@@ -1,0 +1,12 @@
+# /opt/dhcpd6.conf.template
+# DHCPv6 Server Configuration file.
+default-lease-time 600;
+max-lease-time 7200;
+
+option dhcp6.sztp-bootstrap-server code 136 = text;
+
+subnet6 2001:db8:1::/64 {
+    range6 2001:db8:1::100 2001:db8:1::ffff;
+    # option dhcp6.sztp-bootstrap-server "[2001:db8:1::7]:9090";
+    option dhcp6.sztp-bootstrap-server "ipv6.xverse.fusionlayer.com:9090";
+}

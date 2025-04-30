@@ -1,0 +1,10 @@
+tmp/
+certs
+certs/
+*.pem
+*.old
+.DS_Store
+.vscode/
+config.yaml
+__debug*
+*configuration.sh

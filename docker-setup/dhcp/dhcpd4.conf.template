@@ -1,0 +1,21 @@
+# DHCP Server Configuration file.
+
+ddns-update-style interim;
+ignore client-updates;
+authoritative;
+allow booting;
+allow bootp;
+allow unknown-clients;
+option sztp-bootstrap-server code 143  = text;
+
+
+# internal subnet for my DHCP Server
+subnet  ${NODE_IP_SUBNET} netmask  ${NODE_IP_NETMASK} {
+    range  ${NODE_IP_RANGE_MIN}  ${NODE_IP_RANGE_MAX};
+    default-lease-time 600;
+    max-lease-time 7200;
+
+    # option 143 (sZTP RFC-8572) or 136 for ipv6
+    option sztp-bootstrap-server \"10.127.1.7:9090\"; # bootstrap server
+    # option sztp-bootstrap-server \"10.127.1.7:8080\"; # redirecter
+}

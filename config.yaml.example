@@ -1,0 +1,9 @@
+server: "xverse.fusionlayer.com:9090"
+insecure: false
+debug: false
+tmp: "/tmp"
+serial: "device-serial-number"
+password: "device-password"
+private-key: "./certs/device_private_key.pem"
+end-entity-cert: "./certs/device_cert.pem"
+trust-anchor-cert: "./certs/cert_chain.pem"
