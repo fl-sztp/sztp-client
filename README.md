@@ -59,11 +59,11 @@ The client can be configured via a YAML file (default: `./config.yaml`). Example
 server: "xverse.fusionlayer.com:9090"
 insecure: false
 debug: false
-tmp: "./tmp"
+tmp: "/tmp"
 serial: "device-serial-number"
-password: "my-secret"
-private-key: "./certs/first-serial-number_private_key.pem"
-end-entity-cert: "./certs/first-serial-number_my_cert.pem"
+password: "device-password"
+private-key: "./certs/device_private_key.pem"
+end-entity-cert: "./certs/device_cert.pem"
 trust-anchor-cert: "./certs/cert_chain.pem"
 ```
 
