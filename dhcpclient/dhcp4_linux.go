@@ -22,6 +22,7 @@ package dhcpclient
 
 import (
 	"context"
+	"fmt"
 	"net"
 	"strings"
 
@@ -51,7 +52,7 @@ func GetServerFromDHCP4(logger *logrus.Logger) (string, error) {
 		logger.Debug("Trying with device for discovering the Bootstrap server via DHCP4", iface.Name)
 		nc, err := nclient4.New(iface.Name)
 		if err != nil {
-			logger.Fatal("Failed to create DHCPv4 client for discovering the Bootstrap server via DHCP4: ", err)
+			return "", fmt.Errorf("failed to create DHCPv4 client for discovering the Bootstrap server via DHCP4: %w", err)
 		}
 		offer, err := nc.DiscoverOffer(context.Background(), dhcpv4.WithRequestedOptions(dhcpv4.OptionOPTIONIPv6AddressANDSF))
 		if err != nil {
