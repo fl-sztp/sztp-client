@@ -4,6 +4,7 @@
 /*
 SPDX-License-Identifier: Apache-2.0
 Copyright (C) 2025 Anssi Söderena, Sandip Ghimire
+Modifications Copyright (C) 2026 Anssi Söderena
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -22,6 +23,7 @@ package dhcpclient
 
 import (
 	"context"
+	"fmt"
 	"net"
 
 	"github.com/insomniacslk/dhcp/dhcpv6"
@@ -29,13 +31,15 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+// GetServerFromDHCP6 returns the first usable bootstrap server as a normalized
+// HTTPS origin, or an empty string when no usable server is discovered.
 func GetServerFromDHCP6(logger *logrus.Logger) (string, error) {
 
 	// TODO: support for multiple servers?
 
 	interfaces, err := net.Interfaces()
 	if err != nil {
-		logger.Warn("Failed to get network interfaces for discovering the Bootstrap server via DHCP6: ", err)
+		return "", fmt.Errorf("get network interfaces for bootstrap server discovery via DHCP6: %w", err)
 	}
 	for _, iface := range interfaces {
 		// Skip loopback interfaces
@@ -50,34 +54,27 @@ func GetServerFromDHCP6(logger *logrus.Logger) (string, error) {
 		logger.Debug("Trying with device for discovering the Bootstrap server via DHCP6: ", iface.Name)
 		nc, err := nclient6.New(iface.Name)
 		if err != nil {
-			logger.Warn("Failed to create DHCPv6 client for discovering the Bootstrap server via DHCP6: ", err)
+			logger.WithField("interface", iface.Name).WithError(err).Warn("Failed to create DHCPv6 client for discovering the Bootstrap server via DHCP6")
 			continue
 		}
-		solicit, err := nc.Solicit(context.Background(), dhcpv6.WithRequestedOptions(dhcpv6.OptionCode(136)))
+		advertise, err := nc.Solicit(context.Background(), dhcpv6.WithRequestedOptions(dhcpv6.OptionCode(136)))
 		if err != nil {
-			logger.Warn("Failed to solicit the Bootstrap server via DHCP6: ", err)
+			logger.WithField("interface", iface.Name).WithError(err).Warn("Failed to solicit the Bootstrap server via DHCP6")
 			nc.Close()
 			continue
 		}
-		logger.Debug("DHCP6 solicit received SUMAMRY: ", solicit.Summary())
+		logger.Debug("DHCP6 advertise received: ", advertise.Summary())
 
-		// Parse option 136 from the DHCP solicit
-		optionData := solicit.GetOneOption(dhcpv6.OptionCode(136))
+		optionData := advertise.GetOneOption(dhcpv6.OptionCode(136))
+		var optionBytes []byte
 		if optionData != nil {
-			logger.Debug("Option 136 found in DHCP6 solicit: ", optionData)
-			optionDataString := string(optionData.ToBytes())
-			logger.Debug("Option 136 found in DHCP6 solicit STRING: ", optionDataString)
-			if isValidAddress(optionDataString) {
-				logger.Info("Bootstrap server address discovered via DHCP6: ", optionDataString)
-				nc.Close()
-				return optionDataString, nil
-			} else {
-				logger.Warn("Invalid address discovered via DHCP6: ", optionDataString)
-			}
-		} else {
-			logger.Warn("Option 136 not found in DHCP6 solicit")
+			optionBytes = optionData.ToBytes()
 		}
+		server := serverFromOption(logger, iface.Name, 136, optionBytes, optionData != nil)
 		nc.Close()
+		if server != "" {
+			return server, nil
+		}
 	}
 
 	logger.Warn("No valid Bootstrap server address discovered via DHCP6")
