@@ -1,6 +1,7 @@
 /*
 SPDX-License-Identifier: Apache-2.0
 Copyright (C) 2025 Anssi Söderena, Sandip Ghimire
+Modifications Copyright (C) 2026 Anssi Söderena
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -21,6 +22,9 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"strings"
+
+	"fl-sztp-client/serveraddr"
 
 	"gopkg.in/yaml.v3"
 )
@@ -104,6 +108,15 @@ func getConfig() (*Config, error) {
 	}
 	if *bootstrapTrustAnchorCert != "" {
 		config.BootstrapTrustAnchor = *bootstrapTrustAnchorCert
+	}
+
+	config.Server = strings.TrimSpace(config.Server)
+	if config.Server != "" {
+		normalizedServer, err := serveraddr.Normalize(config.Server)
+		if err != nil {
+			return nil, fmt.Errorf("invalid server address: %w", err)
+		}
+		config.Server = normalizedServer
 	}
 
 	// Ensure all mandatory values are set
