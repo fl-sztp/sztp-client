@@ -1,0 +1,21 @@
+# Send only Go source, module metadata, and the container entrypoint.
+**
+!**/*.go
+!go.mod
+!go.sum
+!docker-setup/integration/entrypoint.sh
+
+# Never include sensitive or generated directories, even if they contain Go.
+**/.git
+**/.aws
+**/.codex
+**/.agents
+**/.env*
+**/certs
+**/*.pem
+**/config.yaml
+**/tmp
+**/node_modules
+**/vendor
+**/.*
+**/.*/**
