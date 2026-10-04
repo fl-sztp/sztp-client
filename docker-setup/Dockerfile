@@ -1,16 +1,17 @@
 # Step 1: Build the Go application
-FROM golang:1.23-alpine AS builder
+FROM golang:1.27.1-alpine3.24 AS builder
 
 WORKDIR /app
+ENV CGO_ENABLED=0 GOFLAGS=-mod=readonly
 
-# Copy only go.mod (ignore go.sum if it's missing)
-COPY ../go.mod ./
+# Copy dependency manifests before the source to reuse the download cache.
+COPY go.mod go.sum ./
 
 # Download dependencies based on go.mod
 RUN go mod download
 
 # Copy the entire Go source code
-COPY ../ ./
+COPY . .
 
 # Build the Go application
 RUN go build -o fl-sztp-client .

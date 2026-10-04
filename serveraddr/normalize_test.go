@@ -69,6 +69,8 @@ func TestNormalizeHostnameValidation(t *testing.T) {
 		{"Unicode trailing hyphen", "bücher-.example", ""},
 		{"Unicode mapping exposes leading hyphen", "\u00ad-bücher.example", ""},
 		{"invalid Unicode joiner", "ab\u200dcd.example", ""},
+		{"invalid UTF-8 hostname", "ab\xffcd.example", ""},
+		{"ASCII-only punycode beside Unicode", "xn--example-.bücher.example", ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

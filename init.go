@@ -26,7 +26,7 @@ import (
 
 	"fl-sztp-client/serveraddr"
 
-	"gopkg.in/yaml.v3"
+	"go.yaml.in/yaml/v3"
 )
 
 type Config struct {

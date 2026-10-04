@@ -26,6 +26,52 @@ import (
 	"testing"
 )
 
+func TestConfigFileValues(t *testing.T) {
+	for _, tt := range []struct {
+		name, insecure, debug   string
+		wantInsecure, wantDebug bool
+	}{
+		{"YAML 1.2 booleans", "true", "false", true, false},
+		{"legacy true booleans", "yes", "on", true, true},
+		{"legacy false booleans", "off", "no", false, false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			configPath := filepath.Join(t.TempDir(), "config.yaml")
+			fixture := fmt.Sprintf(`server: "https://bücher.example:8443"
+insecure: %s
+debug: %s
+tmp: "/tmp/sztp test"
+serial: "000042"
+password: "001234:#"
+private-key: "certs/device private.pem"
+end-entity-cert: "certs/device.pem"
+trust-anchor-cert: "certs/ca.pem"
+`, tt.insecure, tt.debug)
+			if err := os.WriteFile(configPath, []byte(fixture), 0600); err != nil {
+				t.Fatal(err)
+			}
+			got, err := getConfigFromFile(configPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			want := Config{
+				Server:               "https://bücher.example:8443",
+				AllowInsecure:        tt.wantInsecure,
+				UseDebug:             tt.wantDebug,
+				TmpFolder:            "/tmp/sztp test",
+				DeviceSerialNumber:   "000042",
+				DevicePassword:       "001234:#",
+				DevicePrivateKey:     "certs/device private.pem",
+				DeviceEndEntityCert:  "certs/device.pem",
+				BootstrapTrustAnchor: "certs/ca.pem",
+			}
+			if *got != want {
+				t.Fatalf("config file values = %+v, want %+v", *got, want)
+			}
+		})
+	}
+}
+
 func TestConfigServerNormalization(t *testing.T) {
 	tests := []struct {
 		name          string

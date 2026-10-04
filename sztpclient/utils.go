@@ -25,8 +25,8 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/go-ini/ini"
 	"github.com/jaypipes/ghw"
+	"gopkg.in/ini.v1"
 )
 
 // DiscoverDeviceInformation discovers the device information and sets the serial number, hardware model, OS name, OS version, and nonce.

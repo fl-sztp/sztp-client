@@ -1,31 +1,28 @@
 module fl-sztp-client
 
-go 1.23.1
-
-require github.com/sirupsen/logrus v1.9.3
+go 1.27.1
 
 require (
-	github.com/StackExchange/wmi v1.2.1 // indirect
-	github.com/github/smimesign v0.2.0 // indirect
-	github.com/go-ole/go-ole v1.2.6 // indirect
-	github.com/insomniacslk/dhcp v0.0.0-20250109001534-8abf58130905 // indirect
-	github.com/jaypipes/pcidb v1.0.1 // indirect
-	github.com/josharian/native v1.1.0 // indirect
-	github.com/mdlayher/packet v1.1.2 // indirect
-	github.com/mdlayher/socket v0.4.1 // indirect
-	github.com/mitchellh/go-homedir v1.1.0 // indirect
-	github.com/pierrec/lz4/v4 v4.1.22 // indirect
-	github.com/pkg/errors v0.9.1 // indirect
-	github.com/u-root/uio v0.0.0-20240224005618-d2acac8f3701 // indirect
-	golang.org/x/net v0.33.0
-	golang.org/x/sync v0.10.0 // indirect
-	golang.org/x/text v0.21.0 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
-	howett.net/plist v1.0.0 // indirect
+	github.com/github/smimesign v0.2.0
+	github.com/insomniacslk/dhcp v0.0.0-20260901064844-234b97448fae
+	github.com/jaypipes/ghw v0.26.0
+	github.com/sirupsen/logrus v1.10.2
+	go.yaml.in/yaml/v3 v3.0.5
+	golang.org/x/net v0.59.0
+	gopkg.in/ini.v1 v1.67.3
 )
 
 require (
-	github.com/go-ini/ini v1.67.0
-	github.com/jaypipes/ghw v0.13.0
-	golang.org/x/sys v0.30.0 // indirect
+	github.com/go-ole/go-ole v1.3.0 // indirect
+	github.com/jaypipes/pcidb v1.1.1 // indirect
+	github.com/mdlayher/packet v1.2.0 // indirect
+	github.com/mdlayher/socket v0.7.0 // indirect
+	github.com/pierrec/lz4/v4 v4.1.33 // indirect
+	github.com/u-root/uio v0.0.0-20240224005618-d2acac8f3701 // indirect
+	github.com/yusufpapurcu/wmi v1.2.4 // indirect
+	golang.org/x/sync v0.23.0 // indirect
+	golang.org/x/sys v0.48.0 // indirect
+	golang.org/x/text v0.42.0 // indirect
+	gopkg.in/yaml.v3 v3.0.1 // indirect
+	howett.net/plist v1.0.2-0.20250314012144-ee69052608d9 // indirect
 )
