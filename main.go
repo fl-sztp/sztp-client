@@ -1,6 +1,7 @@
 /*
 SPDX-License-Identifier: Apache-2.0
 Copyright (C) 2025 Anssi Söderena, Sandip Ghimire
+Modifications Copyright (C) 2026 Anssi Söderena
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -19,9 +20,9 @@ package main
 
 import (
 	"fl-sztp-client/dhcpclient"
+	"fl-sztp-client/serveraddr"
 	"fl-sztp-client/sztpclient"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -30,28 +31,6 @@ import (
 const (
 	FALLBACK_SERVER = "xverse.fusionlayer.com:9090"
 )
-
-func getServerAddressFromDHCP(logger *logrus.Logger) string {
-	server := ""
-
-	var dhcpError error
-	logger.Info("No server address provided, discovering via DHCP6...")
-	server, dhcpError = dhcpclient.GetServerFromDHCP6(logger)
-	if dhcpError != nil {
-		logger.Warn("Failed to discover server address via DHCP6: ", dhcpError)
-	}
-
-	if server == "" {
-		var dhcpError error
-		logger.Info("No server address provided, discovering via DHCP4...")
-		server, dhcpError = dhcpclient.GetServerFromDHCP4(logger)
-		if dhcpError != nil {
-			logger.Warn("Failed to discover server address via DHCP: ", dhcpError)
-		}
-	}
-
-	return server
-}
 
 func main() {
 
@@ -95,27 +74,15 @@ func main() {
 
 		// If the server address is not provided, try to discover it via DHCP
 		if server == "" {
-			DHCPRetries := 10
-			for i := 0; i < DHCPRetries && server == ""; i++ {
-				server = getServerAddressFromDHCP(logger)
-				if server == "" {
-					logger.Error("Failed to discover server address via DHCP")
-					logger.Warnf("Retrying the DHCP discovery in 1 minute... Retry %d/%d", i+1, DHCPRetries)
-					time.Sleep(1 * time.Minute)
-				}
-			}
+			server = discoverServerWithRetry(logger, dhcpclient.GetServerFromDHCP6, dhcpclient.GetServerFromDHCP4, 10, time.Minute, time.Sleep)
 			if server == "" {
-				logger.Error("Failed to discover server address via DHCP after 10 retries")
-				logger.Info("Using fallback server address: ", FALLBACK_SERVER)
-				server = FALLBACK_SERVER
+				logger.Error("Failed to discover server address via DHCP after 10 attempts")
+				server, err = serveraddr.Normalize(FALLBACK_SERVER)
+				if err != nil {
+					logger.Fatalf("Failed to normalize fallback server address: %v", err)
+				}
+				logger.Info("Using fallback server address: ", server)
 			}
-		}
-
-		// Use (force) HTTPS for the request
-		if strings.HasPrefix(server, "http://") {
-			server = "https://" + strings.TrimPrefix(server, "http://")
-		} else if !strings.HasPrefix(server, "https://") {
-			server = "https://" + server
 		}
 
 		// Output the server address
