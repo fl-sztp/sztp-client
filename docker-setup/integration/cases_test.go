@@ -1,21 +1,7 @@
 //go:build linux && dhcp_integration
 
-/*
-SPDX-License-Identifier: Apache-2.0
-Copyright (C) 2026 Anssi Söderena
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// SPDX-FileCopyrightText: 2026 Anssi Söderena <https://github.com/asode>
+// SPDX-License-Identifier: Apache-2.0
 
 package integration
 
@@ -56,15 +42,15 @@ func rawReply(present bool, data string) control.Reply {
 }
 
 func dataScenario(protocol int, data addressCase) integrationCase {
-	c := integrationCase{want: data.want, order: []int{6}, timeout: 20 * time.Second}
-	if protocol == 6 {
-		c.scenario = control.Scenario{V6: []control.Reply{rawReply(data.present, data.data)}, V4: []control.Reply{rawReply(true, sentinelOrigin)}}
+	c := integrationCase{want: data.want, order: []int{4}, timeout: 20 * time.Second}
+	if protocol == 4 {
+		c.scenario = control.Scenario{V4: []control.Reply{rawReply(data.present, data.data)}, V6: []control.Reply{rawReply(true, sentinelOrigin)}}
 		if data.want == "" {
-			c.want, c.order = sentinelOrigin, []int{6, 4}
+			c.want, c.order = sentinelOrigin, []int{4, 6}
 		}
 	} else {
-		c.scenario = control.Scenario{V6: []control.Reply{{}}, V4: []control.Reply{rawReply(data.present, data.data)}}
-		c.order = []int{6, 4}
+		c.scenario = control.Scenario{V4: []control.Reply{{}}, V6: []control.Reply{rawReply(data.present, data.data)}}
+		c.order = []int{4, 6}
 	}
 	return c
 }
@@ -129,7 +115,7 @@ var selectedCase = flag.String("dhcp.case", "", "exact DHCP catalog case name")
 
 func caseCatalog() []namedCase {
 	var cases []namedCase
-	for _, protocol := range []int{6, 4} {
+	for _, protocol := range []int{4, 6} {
 		for _, data := range addressCases() {
 			cases = append(cases, namedCase{name: caseName(protocol, data.name), integrationCase: dataScenario(protocol, data)})
 		}
@@ -137,20 +123,21 @@ func caseCatalog() []namedCase {
 	fragmented := dataScenario(4, addressCase{present: true, data: longURIOption(), want: canonicalOrigin})
 	fragmented.scenario.V4[0].Fragments = []int{1, 255, 46}
 	cases = append(cases, namedCase{name: "v4_fragmented_length_and_payload", integrationCase: fragmented})
-	return append(cases,
-		namedCase{name: "silent_v6_timeout_then_v4", slow: true, integrationCase: integrationCase{
-			scenario: control.Scenario{V6: []control.Reply{{Silent: true}}, V4: []control.Reply{rawReply(true, sentinelOrigin)}},
-			want:     sentinelOrigin, order: []int{6, 4}, timeout: 55 * time.Second, silentProtocol: 6,
+	cases = append(cases,
+		namedCase{name: "silent_v4_timeout_then_v6", slow: true, integrationCase: integrationCase{
+			scenario: control.Scenario{V4: []control.Reply{{Silent: true}}, V6: []control.Reply{rawReply(true, sentinelOrigin)}},
+			want:     sentinelOrigin, order: []int{4, 6}, timeout: 55 * time.Second, silentProtocol: 4,
 		}},
 		namedCase{name: "real_minute_retry_then_v6", slow: true, integrationCase: integrationCase{
 			scenario: control.Scenario{V6: []control.Reply{{}, rawReply(true, "\x00\x16"+canonicalOrigin)}, V4: []control.Reply{{}}},
-			want:     canonicalOrigin, order: []int{6, 4, 6}, timeout: 90 * time.Second, minuteRetry: true,
+			want:     canonicalOrigin, order: []int{4, 6, 4, 6}, timeout: 90 * time.Second, minuteRetry: true,
 		}},
-		namedCase{name: "silent_v4_timeout_then_retry", slow: true, integrationCase: integrationCase{
-			scenario: control.Scenario{V6: []control.Reply{{}}, V4: []control.Reply{{Silent: true}}},
-			order:    []int{6, 4}, timeout: 55 * time.Second, silentProtocol: 4,
+		namedCase{name: "silent_v6_timeout_then_retry", slow: true, integrationCase: integrationCase{
+			scenario: control.Scenario{V4: []control.Reply{{}}, V6: []control.Reply{{Silent: true}}},
+			order:    []int{4, 6}, timeout: 55 * time.Second, silentProtocol: 6,
 		}},
 	)
+	return cases
 }
 
 func selectCases(name string, quick bool) ([]namedCase, error) {

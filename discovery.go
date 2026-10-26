@@ -12,27 +12,27 @@ import (
 
 type discoveryFunc func(*slog.Logger) (string, error)
 
-func discoverServerOnce(logger *slog.Logger, v6, v4 discoveryFunc) string {
-	logger.Info("Discovering server address", "protocol", "DHCPv6")
-	server, err := v6(logger)
+func discoverServerOnce(logger *slog.Logger, v4, v6 discoveryFunc) string {
+	logger.Info("Discovering server address", "protocol", "DHCPv4")
+	server, err := v4(logger)
 	if err != nil {
-		logger.Warn("Failed to discover server address", "protocol", "DHCPv6", "error", err)
+		logger.Warn("Failed to discover server address", "protocol", "DHCPv4", "error", err)
 	} else if server != "" {
 		return server
 	}
 
-	logger.Info("Discovering server address", "protocol", "DHCPv4")
-	server, err = v4(logger)
+	logger.Info("Discovering server address", "protocol", "DHCPv6")
+	server, err = v6(logger)
 	if err != nil {
-		logger.Warn("Failed to discover server address", "protocol", "DHCPv4", "error", err)
+		logger.Warn("Failed to discover server address", "protocol", "DHCPv6", "error", err)
 		return ""
 	}
 	return server
 }
 
-func discoverServerWithRetry(logger *slog.Logger, v6, v4 discoveryFunc, attempts int, delay time.Duration, sleep func(time.Duration)) string {
+func discoverServerWithRetry(logger *slog.Logger, v4, v6 discoveryFunc, attempts int, delay time.Duration, sleep func(time.Duration)) string {
 	for attempt := 1; attempt <= attempts; attempt++ {
-		if server := discoverServerOnce(logger, v6, v4); server != "" {
+		if server := discoverServerOnce(logger, v4, v6); server != "" {
 			return server
 		}
 		logger.Warn("DHCP discovery attempt failed", "attempt", attempt, "max_attempts", attempts)

@@ -55,7 +55,7 @@ func main() {
 
 		// If the server address is not provided, try to discover it via DHCP
 		if server == "" {
-			server = discoverServerWithRetry(logger, dhcpclient.GetServerFromDHCP6, dhcpclient.GetServerFromDHCP4, 10, time.Minute, time.Sleep)
+			server = discoverServerWithRetry(logger, dhcpclient.GetServerFromDHCP4, dhcpclient.GetServerFromDHCP6, 10, time.Minute, time.Sleep)
 			if server == "" {
 				logger.Warn("DHCP discovery exhausted", "attempt", 10)
 				server, err = serveraddr.Normalize(FALLBACK_SERVER)
