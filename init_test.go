@@ -10,7 +10,96 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"fl-sztp-client/sztpclient"
 )
+
+func readHTTPLimitsConfig(t *testing.T, contents string, args ...string) (*Config, error) {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "config.yaml")
+	if err := os.WriteFile(path, []byte(contents), 0600); err != nil {
+		t.Fatal(err)
+	}
+	previousFlags, previousArgs := flag.CommandLine, os.Args
+	defer func() { flag.CommandLine, os.Args = previousFlags, previousArgs }()
+	flag.CommandLine = flag.NewFlagSet("http-limits-test", flag.ContinueOnError)
+	os.Args = append([]string{"http-limits-test", "--config", path}, args...)
+	return getConfig()
+}
+
+func TestHTTPRequestLimitsConfig(t *testing.T) {
+	defaults := sztpclient.DefaultHTTPRequestLimits()
+	c, err := readHTTPLimitsConfig(t, "{}")
+	if err != nil || c.RequestLimits != defaults {
+		t.Fatalf("default config = %+v, error=%v", c, err)
+	}
+	for _, option := range httpLimitOptions(&Config{}) {
+		t.Run(option.name, func(t *testing.T) {
+			yamlValue, cliValue := "4096", "8192"
+			if option.timeout != nil {
+				yamlValue, cliValue = "45s", "2m"
+			}
+			for _, source := range []string{"YAML", "CLI", "override invalid YAML"} {
+				t.Run(source, func(t *testing.T) {
+					contents := option.name + ": " + yamlValue + "\n"
+					var args []string
+					if source != "YAML" {
+						args = []string{"--" + option.name, cliValue}
+					}
+					if source == "override invalid YAML" {
+						contents = option.name + ": invalid\n"
+					}
+					got, err := readHTTPLimitsConfig(t, contents, args...)
+					if err != nil {
+						t.Fatal(err)
+					}
+					want := Config{RequestLimits: defaults}
+					for _, field := range httpLimitOptions(&want) {
+						if field.name != option.name {
+							continue
+						}
+						if field.timeout != nil {
+							*field.timeout = 45 * time.Second
+							if source != "YAML" {
+								*field.timeout = 2 * time.Minute
+							}
+						} else {
+							*field.bytes = 4096
+							if source != "YAML" {
+								*field.bytes = 8192
+							}
+						}
+					}
+					if got.RequestLimits != want.RequestLimits {
+						t.Fatalf("limits=%+v, want %+v", got.RequestLimits, want.RequestLimits)
+					}
+				})
+			}
+			invalid := []string{"", "0", "-1", "invalid", "9223372036854775808"}
+			if option.timeout != nil {
+				invalid = append(invalid, "0s", "-1s", "999999999999999999h")
+			} else {
+				invalid = append(invalid, "1.5", fmt.Sprint(^uint(0)>>1))
+			}
+			for _, value := range invalid {
+				for _, cli := range []bool{false, true} {
+					t.Run(fmt.Sprintf("invalid=%q/CLI=%t", value, cli), func(t *testing.T) {
+						contents := fmt.Sprintf("%s: %q\n", option.name, value)
+						var args []string
+						if cli {
+							contents = option.name + ": " + yamlValue + "\n"
+							args = []string{"--" + option.name, value}
+						}
+						if _, err := readHTTPLimitsConfig(t, contents, args...); err == nil || !strings.Contains(err.Error(), option.name) {
+							t.Fatalf("error=%v, want contextual rejection", err)
+						}
+					})
+				}
+			}
+		})
+	}
+}
 
 // Bootstrap validation now happens after the persistent-state check. Existing
 // configuration tests exercise that validation without filesystem state.

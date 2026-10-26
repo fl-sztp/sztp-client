@@ -11,3 +11,13 @@ password: "device-password"
 private-key: "./certs/device_private_key.pem"
 end-entity-cert: "./certs/device_cert.pem"
 trust-anchor-cert: "./certs/cert_chain.pem"
+
+# Each deadline covers one HTTP request through response reading.
+# Explicit CLI flags override these values. Zero does not disable a limit.
+host-meta-timeout: 30s
+bootstrap-timeout: 120s
+progress-timeout: 30s
+# Maximum response body bytes after automatic HTTP decompression.
+host-meta-max-response-bytes: 1048576 # 1 MiB
+bootstrap-max-response-bytes: 16777216 # 16 MiB, including Base64/CMS envelopes
+progress-max-response-bytes: 65536 # 64 KiB; does not limit outgoing reports

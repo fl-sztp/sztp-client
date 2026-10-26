@@ -166,6 +166,7 @@ func runBootstrapWithRetry(ctx context.Context, logger *slog.Logger, config *Con
 
 		// Create a new bootstrap client instance
 		client := sztpclient.NewClient(logger, config.AllowInsecure, server, config.TmpFolder, config.DeviceSerialNumber, config.DevicePassword, config.DevicePrivateKey, config.DeviceEndEntityCert, config.BootstrapTrustAnchor)
+		client.RequestLimits = config.RequestLimits
 
 		result, err := client.RunBootstrapSequence(ctx)
 		if err != nil {

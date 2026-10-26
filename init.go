@@ -10,9 +10,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 
 	"fl-sztp-client/serveraddr"
+	"fl-sztp-client/sztpclient"
 
 	"go.yaml.in/yaml/v3"
 )
@@ -26,23 +29,77 @@ const (
 )
 
 type Config struct {
-	DiscoverOnly          bool              `yaml:"-"`
-	DiscoveryProtocol     discoveryProtocol `yaml:"-"`
-	DiscoverStopOnSuccess bool              `yaml:"-"`
-	ResetOnboarding       bool              `yaml:"-"`
-	StateDir              string            `yaml:"state-dir"`
-	configLoadErr         error
-	ServerSource          string `yaml:"-"`
-	SerialSource          string `yaml:"-"`
-	Server                string `yaml:"server"`
-	AllowInsecure         bool   `yaml:"insecure"`
-	UseDebug              bool   `yaml:"debug"`
-	TmpFolder             string `yaml:"tmp"`
-	DeviceSerialNumber    string `yaml:"serial"`
-	DevicePassword        string `yaml:"password"`
-	DevicePrivateKey      string `yaml:"private-key"`
-	DeviceEndEntityCert   string `yaml:"end-entity-cert"`
-	BootstrapTrustAnchor  string `yaml:"trust-anchor-cert"`
+	DiscoverOnly              bool              `yaml:"-"`
+	DiscoveryProtocol         discoveryProtocol `yaml:"-"`
+	DiscoverStopOnSuccess     bool              `yaml:"-"`
+	ResetOnboarding           bool              `yaml:"-"`
+	StateDir                  string            `yaml:"state-dir"`
+	configLoadErr             error
+	ServerSource              string                       `yaml:"-"`
+	SerialSource              string                       `yaml:"-"`
+	Server                    string                       `yaml:"server"`
+	AllowInsecure             bool                         `yaml:"insecure"`
+	UseDebug                  bool                         `yaml:"debug"`
+	TmpFolder                 string                       `yaml:"tmp"`
+	DeviceSerialNumber        string                       `yaml:"serial"`
+	DevicePassword            string                       `yaml:"password"`
+	DevicePrivateKey          string                       `yaml:"private-key"`
+	DeviceEndEntityCert       string                       `yaml:"end-entity-cert"`
+	BootstrapTrustAnchor      string                       `yaml:"trust-anchor-cert"`
+	HostMetaTimeout           *string                      `yaml:"host-meta-timeout"`
+	BootstrapTimeout          *string                      `yaml:"bootstrap-timeout"`
+	ProgressTimeout           *string                      `yaml:"progress-timeout"`
+	HostMetaMaxResponseBytes  *string                      `yaml:"host-meta-max-response-bytes"`
+	BootstrapMaxResponseBytes *string                      `yaml:"bootstrap-max-response-bytes"`
+	ProgressMaxResponseBytes  *string                      `yaml:"progress-max-response-bytes"`
+	RequestLimits             sztpclient.HTTPRequestLimits `yaml:"-"`
+}
+
+// Keep raw option values until CLI overrides have been applied. In particular,
+// an explicit zero must fail rather than silently select a library default.
+type httpLimitOption struct {
+	name    string
+	raw     **string
+	timeout *time.Duration
+	bytes   *int64
+}
+
+func httpLimitOptions(c *Config) []httpLimitOption {
+	return []httpLimitOption{
+		{"host-meta-timeout", &c.HostMetaTimeout, &c.RequestLimits.HostMetaTimeout, nil},
+		{"bootstrap-timeout", &c.BootstrapTimeout, &c.RequestLimits.BootstrapTimeout, nil},
+		{"progress-timeout", &c.ProgressTimeout, &c.RequestLimits.ProgressTimeout, nil},
+		{"host-meta-max-response-bytes", &c.HostMetaMaxResponseBytes, nil, &c.RequestLimits.HostMetaMaxResponseBytes},
+		{"bootstrap-max-response-bytes", &c.BootstrapMaxResponseBytes, nil, &c.RequestLimits.BootstrapMaxResponseBytes},
+		{"progress-max-response-bytes", &c.ProgressMaxResponseBytes, nil, &c.RequestLimits.ProgressMaxResponseBytes},
+	}
+}
+
+func resolveHTTPRequestLimits(c *Config, overrides map[string]*string) error {
+	c.RequestLimits = sztpclient.DefaultHTTPRequestLimits()
+	for _, option := range httpLimitOptions(c) {
+		if value, ok := overrides[option.name]; ok {
+			*option.raw = value
+		}
+		if *option.raw == nil {
+			continue
+		}
+		value := **option.raw
+		if option.timeout != nil {
+			duration, err := time.ParseDuration(value)
+			if err != nil || duration <= 0 {
+				return fmt.Errorf("%s must be a positive Go duration, such as 30s or 2m", option.name)
+			}
+			*option.timeout = duration
+		} else {
+			count, err := strconv.ParseInt(value, 10, 64)
+			if err != nil || count <= 0 {
+				return fmt.Errorf("%s must be a positive integer byte count", option.name)
+			}
+			*option.bytes = count
+		}
+	}
+	return c.RequestLimits.Validate()
 }
 
 func getConfigFromFile(filepath string) (*Config, error) {
@@ -80,11 +137,26 @@ func getConfig() (*Config, error) {
 	deviceEndEntityCert := flag.String("end-entity-cert", "", "Specify the device end-entity certificate")
 	bootstrapTrustAnchorCert := flag.String("trust-anchor-cert", "", "Specify the bootstrap trust-anchor certificate")
 	configFile := flag.String("config", "./config.yaml", "Path to configuration file (YAML)")
+	defaultLimits := Config{RequestLimits: sztpclient.DefaultHTTPRequestLimits()}
+	httpFlags := make(map[string]*string)
+	for _, option := range httpLimitOptions(&defaultLimits) {
+		var help string
+		if option.timeout != nil {
+			help = fmt.Sprintf("HTTP request deadline including response reading; positive Go duration (default: %s)", *option.timeout)
+		} else {
+			help = fmt.Sprintf("Maximum HTTP response body size after decompression; positive bytes (default: %d)", *option.bytes)
+		}
+		httpFlags[option.name] = flag.String(option.name, "", help)
+	}
 
 	flag.Parse()
 	configExplicit := false
 	stateDirExplicit := false
+	httpOverrides := make(map[string]*string)
 	flag.Visit(func(f *flag.Flag) {
+		if value, ok := httpFlags[f.Name]; ok {
+			httpOverrides[f.Name] = value
+		}
 		if f.Name == "config" {
 			configExplicit = true
 		}
@@ -188,6 +260,9 @@ func getConfig() (*Config, error) {
 	if *bootstrapTrustAnchorCert != "" {
 		config.BootstrapTrustAnchor = *bootstrapTrustAnchorCert
 	}
+	if err := resolveHTTPRequestLimits(&config, httpOverrides); err != nil {
+		return nil, err
+	}
 
 	if config.DiscoverOnly {
 		if err := normalizeConfigServer(&config); err != nil {
@@ -223,6 +298,9 @@ func validateBootstrapConfig(config *Config) error {
 func validateReportingConfig(config *Config) error {
 	if config.configLoadErr != nil {
 		return config.configLoadErr
+	}
+	if err := config.RequestLimits.Validate(); err != nil {
+		return err
 	}
 	// Ensure all mandatory values are set
 	if config.DevicePassword == "" {

@@ -78,6 +78,7 @@ type BootstrapServerErrorOutput struct {
 
 type Client struct {
 	Logger                        *slog.Logger
+	RequestLimits                 HTTPRequestLimits             // Zero fields use finite defaults.
 	AllowInsecure                 bool                          // Allow insecure connections (skip SSL certificate verification)
 	BootstrapServerURL            string                        // Bootstrap complete URL
 	TmpFolder                     string                        // Temporary folder

@@ -18,6 +18,7 @@ func completionReporter(logger *slog.Logger, config *Config) reportFunc {
 	return func(ctx context.Context, report sztpclient.CompletionReport) error {
 		client := sztpclient.NewClient(logger, config.AllowInsecure, "", "", report.SerialNumber,
 			config.DevicePassword, config.DevicePrivateKey, config.DeviceEndEntityCert, config.BootstrapTrustAnchor)
+		client.RequestLimits = config.RequestLimits
 		return client.ReportCompletion(ctx, report)
 	}
 }

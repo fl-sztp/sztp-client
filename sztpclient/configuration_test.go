@@ -7,11 +7,13 @@ package sztpclient
 
 import (
 	"bytes"
+	"compress/gzip"
 	"context"
 	"encoding/asn1"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
@@ -27,6 +29,11 @@ import (
 
 	"github.com/github/smimesign/ietf-cms/protocol"
 )
+
+type httpLimitCase struct {
+	name, body string
+	request    func(*Client, context.Context) error
+}
 
 func TestNormalizeRedirectAddress(t *testing.T) {
 	for _, tc := range []struct {
@@ -103,6 +110,200 @@ func TestBootstrapRedirectRejectsInvalidTarget(t *testing.T) {
 				t.Fatalf("invalid target changed server to %q", client.BootstrapServerURL)
 			}
 		})
+	}
+}
+
+func httpLimitCases() []httpLimitCase {
+	return []httpLimitCase{
+		{"host-meta", `<XRD xmlns="http://docs.oasis-open.org/ns/xri/xrd-1.0"/>`, func(c *Client, ctx context.Context) error { _, err := c.getHostMeta(ctx); return err }},
+		{"bootstrap", `{}`, func(c *Client, ctx context.Context) error {
+			_, err := c.postRequestWithContext(ctx, "{}", c.BootstrapServerURL, false, http.StatusOK)
+			return err
+		}},
+		{"progress", `{}`, func(c *Client, ctx context.Context) error {
+			_, err := c.postRequestWithContext(ctx, "{}", c.BootstrapServerURL, true, http.StatusOK)
+			return err
+		}},
+	}
+}
+
+func TestHTTPRequestLimitsDeadlines(t *testing.T) {
+	for _, request := range httpLimitCases() {
+		for _, started := range []bool{false, true} {
+			for _, parent := range []string{"background", "earlier deadline", "canceled"} {
+				t.Run(fmt.Sprintf("%s/body-started=%t/%s", request.name, started, parent), func(t *testing.T) {
+					ctx := context.Background()
+					cancel := func() {}
+					want := context.DeadlineExceeded
+					if parent == "earlier deadline" {
+						ctx, cancel = context.WithTimeout(ctx, 50*time.Millisecond)
+					}
+					if parent == "canceled" {
+						ctx, cancel = context.WithCancel(ctx)
+						want = context.Canceled
+					}
+					defer cancel()
+					release := make(chan struct{})
+					server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						_, _ = io.Copy(io.Discard, r.Body)
+						if started {
+							_, _ = io.WriteString(w, "partial")
+							w.(http.Flusher).Flush()
+						}
+						if parent == "canceled" {
+							cancel()
+						}
+						select {
+						case <-r.Context().Done():
+						case <-release:
+						}
+					}))
+					defer func() { close(release); server.Close() }()
+					client := NewClient(slog.New(slog.NewTextHandler(io.Discard, nil)), false, server.URL, "", "", "", "", "", "")
+					timeout := 200 * time.Millisecond
+					if parent != "background" {
+						timeout = 10 * time.Second
+					}
+					client.RequestLimits = HTTPRequestLimits{HostMetaTimeout: timeout, BootstrapTimeout: timeout, ProgressTimeout: timeout}
+					result := make(chan error, 1)
+					go func() { result <- request.request(client, ctx) }()
+					select {
+					case err := <-result:
+						if !errors.Is(err, want) {
+							t.Fatalf("error = %v, want %v", err, want)
+						}
+					case <-time.After(2 * time.Second):
+						t.Fatal("request failed to honor its deadline or cancellation")
+					}
+					if parent == "background" && ctx.Err() != nil {
+						t.Fatalf("request canceled its parent: %v", ctx.Err())
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestHTTPResponseSizeLimits(t *testing.T) {
+	const limit = 128
+	for _, request := range httpLimitCases() {
+		for _, encoding := range []string{"length", "chunked", "gzip"} {
+			for _, size := range []int{limit - 1, limit, limit + 1} {
+				t.Run(fmt.Sprintf("%s/%s/%d", request.name, encoding, size), func(t *testing.T) {
+					body := request.body + strings.Repeat(" ", size-len(request.body))
+					server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						switch encoding {
+						case "length":
+							w.Header().Set("Content-Length", fmt.Sprint(len(body)))
+						case "chunked":
+							w.(http.Flusher).Flush()
+						case "gzip":
+							w.Header().Set("Content-Encoding", "gzip")
+							z := gzip.NewWriter(w)
+							_, _ = io.WriteString(z, body)
+							_ = z.Close()
+							return
+						}
+						_, _ = io.WriteString(w, body)
+					}))
+					defer server.Close()
+					client := NewClient(slog.New(slog.NewTextHandler(io.Discard, nil)), false, server.URL, "", "", "", "", "", "")
+					// Only the selected profile is restrictive: this catches using
+					// the bootstrap cap for host metadata or progress responses.
+					switch request.name {
+					case "host-meta":
+						client.RequestLimits.HostMetaMaxResponseBytes = limit
+					case "bootstrap":
+						client.RequestLimits.BootstrapMaxResponseBytes = limit
+					case "progress":
+						client.RequestLimits.ProgressMaxResponseBytes = limit
+					}
+					err := request.request(client, context.Background())
+					if size > limit {
+						if !errors.Is(err, ErrResponseTooLarge) {
+							t.Fatalf("error = %v, want oversized response", err)
+						}
+					} else if err != nil {
+						t.Fatalf("in-limit response failed: %v", err)
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestHTTPResponseLimitStopsReading(t *testing.T) {
+	reader := strings.NewReader(strings.Repeat("secret response ", 1000))
+	before := reader.Len()
+	data, err := readResponseBody(reader, 64)
+	if !errors.Is(err, ErrResponseTooLarge) || data != nil || strings.Contains(err.Error(), "secret") || before-reader.Len() != 65 {
+		t.Fatalf("data=%q error=%v bytes read=%d", data, err, before-reader.Len())
+	}
+}
+
+func TestHTTPRequestLimitsDefaultsAndValidation(t *testing.T) {
+	defaults := DefaultHTTPRequestLimits()
+	if defaults != (HTTPRequestLimits{HostMetaTimeout: 30 * time.Second, BootstrapTimeout: 120 * time.Second, ProgressTimeout: 30 * time.Second,
+		HostMetaMaxResponseBytes: 1 << 20, BootstrapMaxResponseBytes: 16 << 20, ProgressMaxResponseBytes: 64 << 10}) {
+		t.Fatalf("unexpected default policy: %+v", defaults)
+	}
+	if got := (HTTPRequestLimits{}).withDefaults(); got != defaults {
+		t.Fatalf("zero limits = %+v", got)
+	}
+	partial := HTTPRequestLimits{BootstrapTimeout: time.Second}
+	want := defaults
+	want.BootstrapTimeout = time.Second
+	if got := partial.withDefaults(); got != want {
+		t.Fatalf("partial limits = %+v", got)
+	}
+	for _, limits := range []HTTPRequestLimits{
+		{HostMetaTimeout: -1}, {BootstrapTimeout: -1}, {ProgressTimeout: -1},
+		{HostMetaMaxResponseBytes: -1}, {BootstrapMaxResponseBytes: -1}, {ProgressMaxResponseBytes: -1},
+		{HostMetaMaxResponseBytes: int64(^uint(0) >> 1)},
+	} {
+		if limits.Validate() == nil {
+			t.Fatalf("accepted invalid limits: %+v", limits)
+		}
+	}
+}
+
+func TestBootstrapPreservesHTTPErrors(t *testing.T) {
+	for _, path := range []string{"/.well-known/host-meta", "/restconf/operations/ietf-sztp-bootstrap-server:get-bootstrapping-data"} {
+		for _, failure := range []string{"timeout", "oversize"} {
+			t.Run(path+"/"+failure, func(t *testing.T) {
+				release := make(chan struct{})
+				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					_, _ = io.Copy(io.Discard, r.Body)
+					if r.URL.Path == path {
+						if failure == "timeout" {
+							select {
+							case <-r.Context().Done():
+							case <-release:
+							}
+							return
+						}
+						_, _ = io.WriteString(w, strings.Repeat("x", 513))
+						return
+					}
+					if r.URL.Path == "/.well-known/host-meta" {
+						_, _ = io.WriteString(w, `<XRD xmlns="http://docs.oasis-open.org/ns/xri/xrd-1.0"><Link rel="restconf" href="/restconf"/></XRD>`)
+						return
+					}
+					w.WriteHeader(http.StatusNoContent)
+				}))
+				defer func() { close(release); server.Close() }()
+				client := NewClient(slog.New(slog.NewTextHandler(io.Discard, nil)), false, server.URL, t.TempDir(), "test-device", "", "", "", "")
+				client.RequestLimits = HTTPRequestLimits{HostMetaTimeout: 200 * time.Millisecond, BootstrapTimeout: 200 * time.Millisecond, HostMetaMaxResponseBytes: 512, BootstrapMaxResponseBytes: 512}
+				_, err := client.RunBootstrapSequence(context.Background())
+				want := error(context.DeadlineExceeded)
+				if failure == "oversize" {
+					want = ErrResponseTooLarge
+				}
+				if !errors.Is(err, want) {
+					t.Fatalf("error chain lost %v: %v", want, err)
+				}
+			})
+		}
 	}
 }
 
@@ -256,6 +457,8 @@ func TestScriptFailureRetainsPhaseAndReportsWithoutDuplicateLogs(t *testing.T) {
 	}
 }
 
+// Exercise the public bootstrap sequence with an in-process server, so tests
+// cover preparation and execution ordering rather than invoking them manually.
 func onboardingTestClient(t *testing.T, tmp string, fields map[string]string, onProgress func(ProgressJSON)) (*Client, *bytes.Buffer, <-chan ProgressJSON) {
 	t.Helper()
 	info, err := json.Marshal(map[string]any{

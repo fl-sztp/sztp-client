@@ -16,6 +16,7 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
@@ -80,6 +81,204 @@ func TestBootstrapRetryLogsFailureOnce(t *testing.T) {
 	}
 }
 
+func TestBootstrapHTTPFailuresRetryBeforeProvisioning(t *testing.T) {
+	for _, stage := range []string{"host-meta", "bootstrap", "redirect"} {
+		for _, failure := range []string{"timeout", "oversize"} {
+			t.Run(stage+"/"+failure, func(t *testing.T) {
+				config := testBootstrapConfig(t)
+				config.AllowInsecure = true
+				config.DeviceSerialNumber = "test-device"
+				config.RequestLimits = sztpclient.HTTPRequestLimits{
+					HostMetaTimeout: 200 * time.Millisecond, BootstrapTimeout: 200 * time.Millisecond, ProgressTimeout: time.Second,
+					HostMetaMaxResponseBytes: 512, BootstrapMaxResponseBytes: 4096, ProgressMaxResponseBytes: 128,
+				}
+				scriptLog := filepath.Join(filepath.Dir(config.StateDir), "script-runs")
+				t.Setenv("SZTP_M2_SCRIPT_LOG", scriptLog)
+				info, err := json.Marshal(map[string]any{"ietf-sztp-conveyed-info:onboarding-information": map[string]string{
+					"pre-configuration-script": base64.StdEncoding.EncodeToString([]byte("printf ran >> \"$SZTP_M2_SCRIPT_LOG\"\n")),
+				}})
+				if err != nil {
+					t.Fatal(err)
+				}
+				good := conveyedResponseFixture(t, info)
+				var failed atomic.Bool
+				release := make(chan struct{})
+				defer close(release)
+				fail := func(w http.ResponseWriter, r *http.Request, here string) bool {
+					if stage != here || failed.Swap(true) {
+						return false
+					}
+					_, _ = io.Copy(io.Discard, r.Body)
+					if failure == "timeout" {
+						select {
+						case <-r.Context().Done():
+						case <-release:
+						}
+					} else {
+						limit := config.RequestLimits.BootstrapMaxResponseBytes
+						if stage == "host-meta" {
+							limit = config.RequestLimits.HostMetaMaxResponseBytes
+						}
+						_, _ = io.WriteString(w, strings.Repeat("x", int(limit+1)))
+					}
+					return true
+				}
+				target := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if strings.HasSuffix(r.URL.Path, ":report-progress") {
+						w.WriteHeader(http.StatusNoContent)
+						return
+					}
+					if fail(w, r, "redirect") {
+						return
+					}
+					_ = json.NewEncoder(w).Encode(good)
+				}))
+				defer target.Close()
+				host, portText, _ := net.SplitHostPort(strings.TrimPrefix(target.URL, "https://"))
+				port, _ := strconv.Atoi(portText)
+				redirect := conveyedResponseFixture(t, []byte(fmt.Sprintf(`{"ietf-sztp-conveyed-info:redirect-information":{"bootstrap-server":[{"address":%q,"port":%d}]}}`, host, port)))
+				origin := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					switch r.URL.Path {
+					case "/.well-known/host-meta":
+						if fail(w, r, "host-meta") {
+							return
+						}
+						_, _ = io.WriteString(w, `<XRD xmlns="http://docs.oasis-open.org/ns/xri/xrd-1.0"><Link rel="restconf" href="/restconf"/></XRD>`)
+					case "/restconf/operations/ietf-sztp-bootstrap-server:get-bootstrapping-data":
+						if fail(w, r, "bootstrap") {
+							return
+						}
+						if stage == "redirect" {
+							_ = json.NewEncoder(w).Encode(redirect)
+						} else {
+							_ = json.NewEncoder(w).Encode(good)
+						}
+					case "/restconf/operations/ietf-sztp-bootstrap-server:report-progress":
+						w.WriteHeader(http.StatusNoContent)
+					default:
+						http.NotFound(w, r)
+					}
+				}))
+				defer origin.Close()
+				config.Server = origin.URL
+				var logs bytes.Buffer
+				logger := tmpTestLogger(&logs)
+				waits := 0
+				wait := func(ctx context.Context, delay time.Duration) error {
+					waits++
+					if waits != 1 || ctx.Err() != nil || delay != time.Minute {
+						t.Fatalf("unexpected retry: count=%d delay=%v parent=%v", waits, delay, ctx.Err())
+					}
+					if _, err := os.Stat(scriptLog); !os.IsNotExist(err) {
+						t.Fatalf("script ran before successful fetch: %v", err)
+					}
+					if _, err := os.Stat(filepath.Join(config.StateDir, onboardingStateFile)); !os.IsNotExist(err) {
+						t.Fatalf("failure marked onboarding complete: %v", err)
+					}
+					files, err := os.ReadDir(config.TmpFolder)
+					if err != nil || len(files) != 0 {
+						t.Fatalf("workspace was not cleaned: files=%v error=%v", files, err)
+					}
+					return nil
+				}
+				ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+				defer cancel()
+				err = runOnboarding(ctx, logger, config, func(ctx context.Context) (sztpclient.CompletionReport, error) {
+					return runBootstrapWithRetry(ctx, logger, config, wait)
+				}, func(context.Context, sztpclient.CompletionReport) error { return nil })
+				if err != nil || waits != 1 {
+					t.Fatalf("onboarding error=%v waits=%d logs=%s", err, waits, &logs)
+				}
+				runs, err := os.ReadFile(scriptLog)
+				if err != nil || string(runs) != "ran" {
+					t.Fatalf("script runs=%q error=%v", runs, err)
+				}
+				if state := readTestState(t, config.StateDir); state.ReportStatus != reportAcknowledged {
+					t.Fatalf("state=%+v", state)
+				}
+			})
+		}
+	}
+}
+
+func TestPendingCompletionUsesCurrentHTTPLimits(t *testing.T) {
+	for _, failure := range []string{"timeout", "oversize"} {
+		t.Run(failure, func(t *testing.T) {
+			config := testBootstrapConfig(t)
+			root := filepath.Dir(config.StateDir)
+			cert, key, _ := certificateFixture(t, "device", time.Now().Add(-time.Hour), time.Now().Add(time.Hour))
+			config.DeviceEndEntityCert = writeCertificateFixture(t, root, "client.pem", cert)
+			config.DevicePrivateKey = writeCertificateFixture(t, root, "client-key.pem", key)
+			config.RequestLimits = sztpclient.HTTPRequestLimits{ProgressTimeout: 200 * time.Millisecond, ProgressMaxResponseBytes: 64}
+			var accept atomic.Bool
+			release := make(chan struct{})
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				_, _ = io.Copy(io.Discard, r.Body)
+				if accept.Load() {
+					w.WriteHeader(http.StatusNoContent)
+					return
+				}
+				if failure == "timeout" {
+					select {
+					case <-r.Context().Done():
+					case <-release:
+					}
+					return
+				}
+				w.WriteHeader(http.StatusServiceUnavailable)
+				_, _ = io.WriteString(w, strings.Repeat("x", 65))
+			}))
+			defer func() { close(release); server.Close() }()
+			config.BootstrapTrustAnchor = writeCertificateFixture(t, root, "server.pem", pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw}))
+			state := pendingTestState()
+			state.Report.Endpoint = server.URL + "/report"
+			store, err := openOnboardingStore(config.StateDir)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := store.Save(state); err != nil {
+				_ = store.Close()
+				t.Fatal(err)
+			}
+			if err := store.Close(); err != nil {
+				t.Fatal(err)
+			}
+			bootstrap := func(context.Context) (sztpclient.CompletionReport, error) {
+				t.Fatal("pending report reran bootstrap")
+				return sztpclient.CompletionReport{}, nil
+			}
+			logger := tmpTestLogger(new(bytes.Buffer))
+			send := completionReporter(logger, config)
+			ctx, cancel := context.WithCancel(context.Background())
+			defer cancel()
+			var reportErr error
+			started := time.Now()
+			err = runOnboarding(ctx, logger, config, bootstrap, func(ctx context.Context, report sztpclient.CompletionReport) error {
+				reportErr = send(ctx, report)
+				cancel()
+				return reportErr
+			})
+			want := error(context.DeadlineExceeded)
+			if failure == "oversize" {
+				want = sztpclient.ErrResponseTooLarge
+			}
+			if !errors.Is(err, context.Canceled) || !errors.Is(reportErr, want) || time.Since(started) > 2*time.Second {
+				t.Fatalf("onboarding=%v report=%v elapsed=%v", err, reportErr, time.Since(started))
+			}
+			if got := readTestState(t, config.StateDir); got.ReportStatus != reportPending {
+				t.Fatalf("failure lost pending state: %+v", got)
+			}
+			accept.Store(true)
+			if err := runOnboarding(context.Background(), logger, config, bootstrap, completionReporter(logger, config)); err != nil {
+				t.Fatal(err)
+			}
+			if got := readTestState(t, config.StateDir); got.ReportStatus != reportAcknowledged {
+				t.Fatalf("report was not acknowledged: %+v", got)
+			}
+		})
+	}
+}
+
 func TestBootstrapReportsOriginalValidationError(t *testing.T) {
 	const responseBody = `{"post_configuration_script":["Ensure this field has no more than 10000 characters."]}`
 	const wantMessage = `failed to request bootstrap server onboarding info: json: unknown field "post_configuration_script"; response body: ` + responseBody
@@ -139,7 +338,14 @@ func TestBootstrapReportsOriginalValidationError(t *testing.T) {
 // Exercise real scripts, a bootstrap redirect and mutual TLS. A stopped process
 // resumes only its pending report, using the saved endpoint and serial number.
 func TestOnboardingResumesFailedFinalReport(t *testing.T) {
-	testOnboardingFinalReport(t, false, 0, false)
+	for _, stalled := range []bool{false, true} {
+		name := "HTTP error"
+		if stalled {
+			name = "stalled report"
+		}
+		t.Run(name, func(t *testing.T) { testOnboardingFinalReport(t, stalled, 0, false) })
+	}
+	t.Run("configured report deadline", func(t *testing.T) { testOnboardingFinalReport(t, true, 200*time.Millisecond, false) })
 }
 
 func TestOnboardingIPv6Redirect(t *testing.T) {
@@ -149,6 +355,7 @@ func TestOnboardingIPv6Redirect(t *testing.T) {
 func testOnboardingFinalReport(t *testing.T, stalled bool, timeout time.Duration, ipv6 bool) {
 	t.Helper()
 	config := testBootstrapConfig(t)
+	config.RequestLimits.ProgressTimeout = timeout
 	config.DeviceSerialNumber = "test-device"
 	root := filepath.Dir(config.StateDir)
 	scriptLog := filepath.Join(root, "script-runs")
