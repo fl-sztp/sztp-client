@@ -1,29 +1,30 @@
+<!--
+SPDX-FileCopyrightText: 2025 Anssi Söderena <https://github.com/asode>
+SPDX-License-Identifier: Apache-2.0
+-->
+
 # SZTP Client
 
-Go implementation of a Secure Zero Touch Provisioning client, designed to automate the secure onboarding and provisioning of devices such as computers, DPUs, and network equipment. It communicates with an SZTP bootstrap server using mutual TLS authentication and supports secure device identity verification and configuration delivery.
+SZTP Client automates device onboarding using Secure Zero Touch Provisioning. It connects to a bootstrap server using mutual TLS, downloads configuration and runs provisioning scripts. It is written in Go and intended for computers, DPUs and network equipment.
 
-Our future goal is to align with the [RFC 8572](https://datatracker.ietf.org/doc/html/rfc8572) specifications for SZTP.
+The client has been tested with [FusionLayer Xverse](https://www.fusionlayer.com/xverse) and [Watsen Networks SZTPD](https://watsen.net/products/sztpd). Compatibility with other servers has not been verified. Full [RFC 8572](https://datatracker.ietf.org/doc/html/rfc8572) compliance is a work in progress.
 
-This project is inspired by and derived from the OPI Project’s [sztp-agent](https://github.com/opiproject/sztp/tree/main/sztp-agent).
-
-During the development of a production-ready SZTP client solution – tested on real hardware and in virtualized environments — we identified specific requirements that led us to design an independent implementation.  
-We welcome the opportunity to contribute any improvements to the original project or to any future derivatives.
-
-While our long-term goal is to make the client cross-platform, the current development and testing are targeted at Linux systems.
-
-This client has been developed against and tested with [FusionLayer](https://www.fusionlayer.com) Xverse and Watsen Networks’ [SZTPD](https://watsen.net/products/sztpd). Other SZTP servers that support the RFC 8572 specifications should work as well, but we cannot guarantee this.
+The command-line application is currently the supported way to use this project. Its Go packages are implementation details and do not provide a stable public library API. Library support may be introduced in the future if there is a need for it.
 
 This project has been made possible by [FusionLayer Inc](https://www.fusionlayer.com).
 
 ## Requirements
 
-- Linux (tested on Ubuntu; other distributions may work)
-- Network connectivity to an SZTP bootstrap server
-- Device certificates and keys (see configuration)
+- Linux. Development and testing focus on Ubuntu.
+- Go 1.27.0 or later to build from source.
+- Network access to an SZTP bootstrap server.
+- A device serial number, password, private key, device certificate and trust anchor certificate. The client can also read the serial number from firmware.
 
-## Build
+## Quick start
 
-Clone the repository and build using Go (tested with Go 1.24):
+Run these steps on the target Linux device. For installation at boot or in a container, see [deployment](docs/deployment.md).
+
+### 1. Build the client
 
 ```sh
 git clone https://github.com/fl-sztp/sztp-client.git
@@ -31,69 +32,58 @@ cd sztp-client
 go build -o sztp-client .
 ```
 
-## Usage
+This creates the `sztp-client` binary in the repository directory.
 
-Run the client with the desired options:
-
-```sh
-./sztp-client --config ./config.yaml
-```
-
-You can override configuration file values with command-line flags:
+### 2. Configure the device
 
 ```sh
-./sztp-client --server example.com:9090 --serial DEVICE_SERIAL --password DEVICE_PASSWORD --private-key ./key.pem --end-entity-cert ./cert.pem --trust-anchor-cert ./ca.pem
+cp config.yaml.example config.yaml
 ```
 
-For all available flags, run:
+Edit `config.yaml` before running the client. Set your bootstrap server, device serial number and password. Place your device credentials in `certs/`, or change the three certificate and key paths to their actual locations. The example values are placeholders for your device.
+
+Use an explicit `server` address for this first run. An empty `server` enables DHCP discovery, which normally needs root privileges. See the [configuration reference](docs/usage.md#configure-the-client) for all settings.
+
+### 3. Run provisioning
+
+This command starts provisioning and runs the scripts supplied by the server:
 
 ```sh
-./sztp-client --help
+./sztp-client --config ./config.yaml --state-dir="$HOME/.local/state/sztp-client"
 ```
 
-## Configuration
+The state directory must be an absolute path. This example uses a persistent location writable by the current user. The default `/var/lib/sztp-client` normally requires administrator setup. The systemd service creates it automatically. Provisioning scripts may also need additional privileges.
 
-The client can be configured via a YAML file (default: `./config.yaml`). Example:
+Progress and script output appear on stderr. The client exits successfully after local provisioning completes and the server acknowledges the final report. Run `./sztp-client --help` to list command-line options.
 
-```yaml
-server: "xverse.fusionlayer.com:9090"
-insecure: false
-debug: false
-tmp: "/tmp"
-serial: "device-serial-number"
-password: "device-password"
-private-key: "./certs/device_private_key.pem"
-end-entity-cert: "./certs/device_cert.pem"
-trust-anchor-cert: "./certs/cert_chain.pem"
-```
+## How completion works
 
-- `server`: Address of the SZTP bootstrap server.
-- `insecure`: Allow insecure TLS (skip certificate verification).
-- `debug`: Enable debug logging.
-- `tmp`: Temporary directory for intermediate files.
-- `serial`: Device serial number.
-- `password`: Device password.
-- `private-key`: Path to the device's private key.
-- `end-entity-cert`: Path to the device's certificate.
-- `trust-anchor-cert`: Path to the trust anchor (CA) certificate.
+The client records successful provisioning in its state directory. On subsequent runs, the client reads this record and skips provisioning. If the final report is still pending, the client retries reporting without rerunning scripts. Keep the state directory across restarts and container replacements.
 
-Command-line flags take precedence over configuration file values.
+If a run is interrupted before completion is saved, the client may run earlier scripts again. Write scripts so they can safely run more than once. Temporary files are removed after provisioning. Install anything you need to keep outside the workspace.
 
-## TODO
+To provision a completed device again, follow the [reset procedure](docs/deployment.md#provision-a-device-again). Changing its configuration or serial number does not reset completion.
 
-- Improve the client's retry logic when connecting to the bootstrap server.
-- Implement a mechanism to detect if the client has already been onboarded.
-- Support configuration for multiple bootstrap servers.
-- Add comprehensive unit and integration tests.
-- Implement support for boot image downloads and installation.
-- Enhance DHCP-based bootstrap server discovery for non-Ubuntu operating systems.
-- Extend support to additional operating systems (e.g., CentOS, Windows).
-- Achieve full compliance with RFC 8572.
+## Current limitations
 
-## Contributing
+Provisioning scripts must apply the downloaded configuration. The client currently ignores boot-image requests and `configuration-handling` modes such as `merge` and `replace`. These requests do not prevent it from recording completion. You can configure only one bootstrap server.
 
-This project welcomes contributions and suggestions. Please submit issues and pull requests for improvements, bug fixes, or new features.
+Linux is the current target. Other operating systems and full RFC 8572 behavior remain future work.
+
+## Guides
+
+| I want to… | Read |
+| --- | --- |
+| Change settings, test DHCP or write provisioning scripts | [Using the client](docs/usage.md) |
+| Install with systemd or Docker, inspect state or reprovision | [Deployment and maintenance](docs/deployment.md) |
+| Run tests or prepare a distribution | [Development](docs/development.md) |
+
+## Contributing and credits
+
+Issues and pull requests are welcome. See the [development guide](docs/development.md) for checks to run with a change.
+
+This project is derived from the OPI Project’s [sztp-agent](https://github.com/opiproject/sztp/tree/main/sztp-agent) and made possible by [FusionLayer Inc](https://www.fusionlayer.com).
 
 ## License
 
-This project is licensed under the Apache License 2.0.
+This project is licensed under the [Apache License 2.0](LICENSE). When distributing binaries or images, also include the applicable dependency licenses and notices. See [preparing a distribution](docs/development.md#prepare-a-distribution).
