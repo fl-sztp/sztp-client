@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2025 Anssi Söderena <https://github.com/asode>
+# SPDX-License-Identifier: Apache-2.0
+
 # /opt/dhcpd6.conf.template
 # DHCPv6 Server Configuration file.
 default-lease-time 600;

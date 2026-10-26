@@ -1,0 +1,15 @@
+version = 1
+
+[[annotations]]
+path = [
+    "go.sum",
+    "go.mod",
+    ".gitignore",
+    "docker-setup/.env",
+    "docker-setup/Dockerfile.dockerignore",
+    "docker-setup/integration/Dockerfile.dockerignore",
+]
+precedence = "closest"
+SPDX-FileCopyrightText = "NONE"
+SPDX-License-Identifier = "Apache-2.0"
+SPDX-FileComment = "No original expressive content identified in dependency metadata, ignore patterns or the Compose project-name setting."

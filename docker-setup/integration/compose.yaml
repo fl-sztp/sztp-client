@@ -1,3 +1,6 @@
+# SPDX-FileCopyrightText: 2026 Anssi Söderena <https://github.com/asode>
+# SPDX-License-Identifier: Apache-2.0
+
 name: ${SZTP_DHCP_PROJECT:?Run integration/run.sh to set the project name}
 
 x-runtime: &runtime

@@ -1,3 +1,11 @@
+# SPDX-FileCopyrightText: NOASSERTION
+# SPDX-FileCopyrightText: 2025 Anssi Söderena <https://github.com/asode> (modifications)
+# SPDX-License-Identifier: Apache-2.0
+
+# Upstream copyright holder unknown after source/history review.
+# Derived from the OPI Project's dhcp/dhcpd.conf.template:
+# https://github.com/opiproject/sztp/blob/77e411d76d8805b2c4b71c94248400266b8da851/dhcp/dhcpd.conf.template
+
 # DHCP Server Configuration file.
 
 ddns-update-style interim;
