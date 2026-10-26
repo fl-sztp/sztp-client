@@ -1,20 +1,7 @@
-/*
-SPDX-License-Identifier: Apache-2.0
-Copyright (C) 2025 Anssi Söderena, Sandip Ghimire
-Modifications Copyright (C) 2026 Anssi Söderena
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// SPDX-FileCopyrightText: 2025 Anssi Söderena <https://github.com/asode>
+// SPDX-FileCopyrightText: 2025 Sandip Ghimire <https://github.com/sandip-ghimire>
+// SPDX-FileCopyrightText: 2026 Anssi Söderena <https://github.com/asode> (modifications)
+// SPDX-License-Identifier: Apache-2.0
 
 package main
 
@@ -29,16 +16,30 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
+type discoveryProtocol uint8
+
+const (
+	discoverBoth discoveryProtocol = iota
+	discoverDHCP4
+	discoverDHCP6
+)
+
 type Config struct {
-	Server               string `yaml:"server"`
-	AllowInsecure        bool   `yaml:"insecure"`
-	UseDebug             bool   `yaml:"debug"`
-	TmpFolder            string `yaml:"tmp"`
-	DeviceSerialNumber   string `yaml:"serial"`
-	DevicePassword       string `yaml:"password"`
-	DevicePrivateKey     string `yaml:"private-key"`
-	DeviceEndEntityCert  string `yaml:"end-entity-cert"`
-	BootstrapTrustAnchor string `yaml:"trust-anchor-cert"`
+	DiscoverOnly          bool              `yaml:"-"`
+	DiscoveryProtocol     discoveryProtocol `yaml:"-"`
+	DiscoverStopOnSuccess bool              `yaml:"-"`
+	configLoadErr         error
+	ServerSource          string `yaml:"-"`
+	SerialSource          string `yaml:"-"`
+	Server                string `yaml:"server"`
+	AllowInsecure         bool   `yaml:"insecure"`
+	UseDebug              bool   `yaml:"debug"`
+	TmpFolder             string `yaml:"tmp"`
+	DeviceSerialNumber    string `yaml:"serial"`
+	DevicePassword        string `yaml:"password"`
+	DevicePrivateKey      string `yaml:"private-key"`
+	DeviceEndEntityCert   string `yaml:"end-entity-cert"`
+	BootstrapTrustAnchor  string `yaml:"trust-anchor-cert"`
 }
 
 func getConfigFromFile(filepath string) (*Config, error) {
@@ -63,6 +64,10 @@ func getConfig() (*Config, error) {
 	serverFlag := flag.String("server", "", "Specify the server address")
 	allowInsecureFlag := flag.Bool("insecure", false, "Allow insecure connections (skip SSL certificate verification)")
 	useDebugFlag := flag.Bool("debug", false, "Enable debug mode")
+	discoverOnlyFlag := flag.Bool("discover-only", false, "Test DHCPv4 and DHCPv6 discovery and report device information and configured certificates without bootstrapping")
+	discoverOnlyDHCP4Flag := flag.Bool("discover-only-dhcp4", false, "Test only DHCPv4 discovery and report device information and configured certificates without bootstrapping")
+	discoverOnlyDHCP6Flag := flag.Bool("discover-only-dhcp6", false, "Test only DHCPv6 discovery and report device information and configured certificates without bootstrapping")
+	discoverStopOnSuccessFlag := flag.Bool("discover-stop-on-success", false, "Stop DHCP probes after the first accepted bootstrap server address; requires a discover-only mode")
 	tmpFolder := flag.String("tmp", "", "Specify the temporary folder")
 	deviceSerialNumber := flag.String("serial", "", "Specify the device serial number")
 	devicePassword := flag.String("password", "", "Specify the device password")
@@ -72,20 +77,66 @@ func getConfig() (*Config, error) {
 	configFile := flag.String("config", "./config.yaml", "Path to configuration file (YAML)")
 
 	flag.Parse()
+	configExplicit := false
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == "config" {
+			configExplicit = true
+		}
+	})
+	discoveryMode := ""
+	protocol := discoverBoth
+	for _, mode := range []struct {
+		name     string
+		enabled  bool
+		protocol discoveryProtocol
+	}{
+		{"--discover-only", *discoverOnlyFlag, discoverBoth},
+		{"--discover-only-dhcp4", *discoverOnlyDHCP4Flag, discoverDHCP4},
+		{"--discover-only-dhcp6", *discoverOnlyDHCP6Flag, discoverDHCP6},
+	} {
+		if !mode.enabled {
+			continue
+		}
+		if discoveryMode != "" {
+			return nil, fmt.Errorf("%s and %s are mutually exclusive; select only one discover-only mode", discoveryMode, mode.name)
+		}
+		discoveryMode, protocol = mode.name, mode.protocol
+	}
+	if *discoverStopOnSuccessFlag && discoveryMode == "" {
+		return nil, fmt.Errorf("--discover-stop-on-success requires --discover-only, --discover-only-dhcp4, or --discover-only-dhcp6")
+	}
 
 	// Load configuration from file if provided
 	var config Config
 	if *configFile != "" {
 		fileConfig, err := getConfigFromFile(*configFile)
 		if err != nil {
-			return nil, fmt.Errorf("error loading config file: %v", err)
+			loadErr := fmt.Errorf("error loading config file: %w", err)
+			if configExplicit || !os.IsNotExist(err) {
+				return nil, loadErr
+			}
+			// A missing implicit config is harmless for reset, diagnostics, or
+			// an already onboarded device. Bootstrap still requires it.
+			config.configLoadErr = loadErr
 		}
-		config = *fileConfig
+		if fileConfig != nil {
+			config = *fileConfig
+			if config.Server != "" {
+				config.ServerSource = "config: " + *configFile
+			}
+			if config.DeviceSerialNumber != "" {
+				config.SerialSource = "config: " + *configFile
+			}
+		}
 	}
+	config.DiscoverOnly = discoveryMode != ""
+	config.DiscoveryProtocol = protocol
+	config.DiscoverStopOnSuccess = *discoverStopOnSuccessFlag
 
 	// Override configuration with command-line flags if provided
 	if *serverFlag != "" {
 		config.Server = *serverFlag
+		config.ServerSource = "CLI --server"
 	}
 
 	config.AllowInsecure = *allowInsecureFlag || config.AllowInsecure
@@ -96,6 +147,7 @@ func getConfig() (*Config, error) {
 	}
 	if *deviceSerialNumber != "" {
 		config.DeviceSerialNumber = *deviceSerialNumber
+		config.SerialSource = "CLI --serial"
 	}
 	if *devicePassword != "" {
 		config.DevicePassword = *devicePassword
@@ -110,28 +162,59 @@ func getConfig() (*Config, error) {
 		config.BootstrapTrustAnchor = *bootstrapTrustAnchorCert
 	}
 
+	if config.DiscoverOnly {
+		if err := normalizeConfigServer(&config); err != nil {
+			return nil, err
+		}
+	}
+	if !config.DiscoverOnly {
+		if err := validateBootstrapConfig(&config); err != nil {
+			return nil, err
+		}
+	}
+	return &config, nil
+}
+
+func normalizeConfigServer(config *Config) error {
 	config.Server = strings.TrimSpace(config.Server)
 	if config.Server != "" {
 		normalizedServer, err := serveraddr.Normalize(config.Server)
 		if err != nil {
-			return nil, fmt.Errorf("invalid server address: %w", err)
+			return fmt.Errorf("invalid server address: %w", err)
 		}
 		config.Server = normalizedServer
 	}
+	return nil
+}
 
+func validateBootstrapConfig(config *Config) error {
+	if config.configLoadErr != nil {
+		return config.configLoadErr
+	}
+	if err := normalizeConfigServer(config); err != nil {
+		return err
+	}
+
+	return validateReportingConfig(config)
+}
+
+func validateReportingConfig(config *Config) error {
+	if config.configLoadErr != nil {
+		return config.configLoadErr
+	}
 	// Ensure all mandatory values are set
 	if config.DevicePassword == "" {
-		return nil, fmt.Errorf("device password is required")
+		return fmt.Errorf("device password is required")
 	}
 	if config.DevicePrivateKey == "" {
-		return nil, fmt.Errorf("device private key is required")
+		return fmt.Errorf("device private key is required")
 	}
 	if config.DeviceEndEntityCert == "" {
-		return nil, fmt.Errorf("device end-entity certificate is required")
+		return fmt.Errorf("device end-entity certificate is required")
 	}
 	if config.BootstrapTrustAnchor == "" {
-		return nil, fmt.Errorf("bootstrap trust-anchor certificate is required")
+		return fmt.Errorf("bootstrap trust-anchor certificate is required")
 	}
 
-	return &config, nil
+	return nil
 }

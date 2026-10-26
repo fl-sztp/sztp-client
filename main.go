@@ -34,6 +34,10 @@ func main() {
 	slog.SetDefault(logger)
 	logger.Debug("Debug mode enabled")
 
+	if config.DiscoverOnly {
+		os.Exit(runDiscoveryReport(os.Stdout, logger, config, sztpclient.DiscoverDeviceInformation, dhcpclient.GetServerFromDHCP4, dhcpclient.GetServerFromDHCP6))
+	}
+
 	// try to create tmp folder if it doesn't exist
 	if _, err := os.Stat(config.TmpFolder); os.IsNotExist(err) {
 		err = os.Mkdir(config.TmpFolder, 0755)

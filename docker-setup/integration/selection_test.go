@@ -23,7 +23,7 @@ func TestCaseSelection(t *testing.T) {
 			slow++
 		}
 	}
-	if len(catalog) != 76 || slow != 3 {
+	if len(catalog) != 89 || slow != 4 {
 		t.Fatalf("catalog has %d cases, %d slow", len(catalog), slow)
 	}
 	for _, tc := range []struct {
@@ -32,8 +32,8 @@ func TestCaseSelection(t *testing.T) {
 		count          int
 		errorText      string
 	}{
-		{name: "full", count: 76},
-		{name: "quick", quick: true, count: 73},
+		{name: "full", count: 89},
+		{name: "quick", quick: true, count: 85},
 		{name: "exact", selected: "silent_v6_timeout_then_retry", count: 1},
 		{name: "unknown", selected: "v6_.*", errorText: "valid cases:"},
 		{name: "quick_slow", selected: "silent_v6_timeout_then_retry", quick: true, errorText: "cannot run with --quick"},

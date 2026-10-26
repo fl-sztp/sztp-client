@@ -192,12 +192,21 @@ func (d *integrationDriver) run(t *testing.T, suite context.Context, c integrati
 		t.Fatalf("fixture reset must clear events: count=%d error=%v", len(initial), err)
 	}
 	work := t.TempDir()
-	key, cert := writeCredentials(t, work)
-	process, err = startClient(work, key, cert)
+	if c.discoverOnly != nil {
+		process, err = startDiscoveryClient(t, work, &c)
+	} else {
+		key, cert := writeCredentials(t, work)
+		process, err = startClient(work, key, cert)
+	}
 	if err != nil {
 		t.Fatalf("start production client: %v", err)
 	}
-	if err := process.awaitDiscovery(ctx, c); err != nil {
+	if c.discoverOnly != nil {
+		err = process.awaitDiscoveryReport(ctx, c, work)
+	} else {
+		err = process.awaitDiscovery(ctx, c)
+	}
+	if err != nil {
 		t.Errorf("production discovery: %v", err)
 	}
 	c.timeoutObserved = time.Now()
@@ -275,11 +284,17 @@ type clientProcess struct {
 }
 
 func startClient(work, key, cert string) (*clientProcess, error) {
-	p := &clientProcess{stdout: &lockedLog{}, stderr: &lockedLog{}, done: make(chan struct{})}
-	p.cmd = exec.Command(productionBinary,
+	return startClientProcess(work, []string{
 		"--config", "", "--debug", "--insecure", "--tmp", work,
 		"--serial", "docker-test", "--password", "test-only",
-		"--private-key", key, "--end-entity-cert", cert, "--trust-anchor-cert", cert)
+		"--private-key", key, "--end-entity-cert", cert, "--trust-anchor-cert", cert}, nil)
+}
+
+func startClientProcess(work string, args, env []string) (*clientProcess, error) {
+	p := &clientProcess{stdout: &lockedLog{}, stderr: &lockedLog{}, done: make(chan struct{})}
+	p.cmd = exec.Command(productionBinary, args...)
+	p.cmd.Dir = work
+	p.cmd.Env = append(os.Environ(), env...)
 	p.cmd.Stdout, p.cmd.Stderr = p.stdout, p.stderr
 	p.started = time.Now()
 	if err := p.cmd.Start(); err != nil {

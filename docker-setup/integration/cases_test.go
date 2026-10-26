@@ -26,6 +26,7 @@ type addressCase struct {
 }
 
 type integrationCase struct {
+	discoverOnly    *discoveryReportCase
 	scenario        control.Scenario
 	want            string
 	order           []int
@@ -33,6 +34,18 @@ type integrationCase struct {
 	silentProtocol  int
 	timeoutObserved time.Time
 	minuteRetry     bool
+}
+
+type discoveryReportCase struct {
+	mode           string
+	stopOnSuccess  bool
+	skipV4, skipV6 string
+	v6, v4         string
+	configured     bool
+	missingSerial  bool
+	autoSerial     bool
+	certificates   bool
+	exitCode       int
 }
 
 func caseName(protocol int, name string) string { return fmt.Sprintf("v%d_%s", protocol, name) }
@@ -137,6 +150,45 @@ func caseCatalog() []namedCase {
 			order:    []int{4, 6}, timeout: 55 * time.Second, silentProtocol: 6,
 		}},
 	)
+	return append(cases, discoveryReportCases()...)
+}
+
+func discoveryReportCases() []namedCase {
+	valid6 := rawReply(true, canonicalOrigin)
+	valid4 := rawReply(true, sentinelOrigin)
+	invalid := rawReply(true, "https://bad..example")
+	var cases []namedCase
+	for _, tc := range []struct {
+		name   string
+		v6, v4 control.Reply
+		report discoveryReportCase
+		silent bool
+		order  []int
+	}{
+		{"both_valid", valid6, valid4, discoveryReportCase{v6: canonicalOrigin, v4: sentinelOrigin}, false, nil},
+		{"v4_only", invalid, valid4, discoveryReportCase{v4: sentinelOrigin}, false, nil},
+		{"v6_only", valid6, control.Reply{}, discoveryReportCase{v6: canonicalOrigin}, false, nil},
+		{"invalid_both", invalid, invalid, discoveryReportCase{exitCode: 1}, false, nil},
+		{"configured_server", valid6, valid4, discoveryReportCase{v6: canonicalOrigin, v4: sentinelOrigin, configured: true}, false, nil},
+		{"configured_server_without_dhcp", control.Reply{}, control.Reply{}, discoveryReportCase{configured: true, exitCode: 1}, false, nil},
+		{"missing_serial", valid6, valid4, discoveryReportCase{v6: canonicalOrigin, v4: sentinelOrigin, missingSerial: true, exitCode: 1}, false, nil},
+		{"hardware_serial_and_certificates", valid6, valid4, discoveryReportCase{v6: canonicalOrigin, v4: sentinelOrigin, autoSerial: true, certificates: true}, false, nil},
+		{"silent_v6", control.Reply{Silent: true}, valid4, discoveryReportCase{v4: sentinelOrigin}, true, nil},
+		{"dhcp4_selected", control.Reply{Silent: true}, valid4, discoveryReportCase{mode: "--discover-only-dhcp4", v4: sentinelOrigin, skipV6: "not selected"}, false, []int{4}},
+		{"dhcp6_selected", valid6, control.Reply{Silent: true}, discoveryReportCase{mode: "--discover-only-dhcp6", v6: canonicalOrigin, skipV4: "not selected"}, false, []int{6}},
+		{"stop_after_v4_success", control.Reply{Silent: true}, valid4, discoveryReportCase{stopOnSuccess: true, v4: sentinelOrigin, skipV6: "bootstrap server already found via DHCPv4"}, false, []int{4}},
+		{"stop_continues_after_invalid_v4", valid6, invalid, discoveryReportCase{stopOnSuccess: true, v6: canonicalOrigin}, false, []int{4, 6}},
+	} {
+		report := tc.report
+		c := integrationCase{discoverOnly: &report, scenario: control.Scenario{V6: []control.Reply{tc.v6}, V4: []control.Reply{tc.v4}}, order: []int{4, 6}, timeout: 20 * time.Second}
+		if tc.order != nil {
+			c.order = tc.order
+		}
+		if tc.silent {
+			c.silentProtocol, c.timeout = 6, 55*time.Second
+		}
+		cases = append(cases, namedCase{name: "discover_only_" + tc.name, integrationCase: c, slow: tc.silent})
+	}
 	return cases
 }
 
