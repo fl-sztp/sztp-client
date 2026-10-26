@@ -11,6 +11,7 @@ package sztpclient
 
 import (
 	"bytes"
+	"context"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
@@ -24,10 +25,10 @@ import (
 	"strings"
 )
 
-func (a *Client) getHostMeta() (XRD, error) {
+func (a *Client) getHostMeta(ctx context.Context) (XRD, error) {
 	url := a.BootstrapServerURL + "/.well-known/host-meta"
 
-	r, err := http.NewRequest(http.MethodGet, url, nil)
+	r, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return XRD{}, err
 	}
@@ -50,6 +51,7 @@ func (a *Client) getHostMeta() (XRD, error) {
 		},
 	}
 
+	defer client.CloseIdleConnections()
 	res, err := client.Do(r)
 	if err != nil {
 		return XRD{}, err
@@ -76,13 +78,17 @@ func (a *Client) getHostMeta() (XRD, error) {
 }
 
 func (a *Client) postRequest(input string, url string, empty bool, expectedStatusCode int) (*BootstrapServerPostOutput, error) {
+	return a.postRequestWithContext(context.Background(), input, url, empty, expectedStatusCode)
+}
+
+func (a *Client) postRequestWithContext(ctx context.Context, input string, url string, empty bool, expectedStatusCode int) (*BootstrapServerPostOutput, error) {
 	var postResponse BootstrapServerPostOutput
 	var errorResponse BootstrapServerErrorOutput
 
-	a.Logger.Debug(fmt.Sprintf("Starting the request to %s with input: %s", url, input))
+	a.Logger.Debug("Starting request", "url", url, "input", input)
 
 	body := strings.NewReader(input)
-	r, err := http.NewRequest(http.MethodPost, url, body)
+	r, err := http.NewRequestWithContext(ctx, http.MethodPost, url, body)
 	if err != nil {
 		return nil, err
 	}
@@ -105,12 +111,14 @@ func (a *Client) postRequest(input string, url string, empty bool, expectedStatu
 			},
 		},
 	}
+	defer client.CloseIdleConnections()
 	res, err := client.Do(r)
 	if err != nil {
 		return nil, err
 	}
 	defer func() {
 		if err := res.Body.Close(); err != nil {
+			a.Logger.Warn("Failed to close response body", "url", url, "error", err)
 		}
 	}()
 

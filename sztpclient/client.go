@@ -11,17 +11,24 @@ package sztpclient
 
 import (
 	"bytes"
+	"context"
 	"encoding/asn1"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"log/slog"
+	"net"
 	"net/http"
-	"reflect"
+	"net/netip"
+	"net/url"
 	"strconv"
 	"strings"
 
+	"fl-sztp-client/serveraddr"
+
 	"github.com/github/smimesign/ietf-cms/protocol"
-	"log/slog"
 )
 
 func NewClient(logger *slog.Logger, allowInsecure bool, BootstrapServerURL, tmpFolder, serialNumber, devicePassword, devicePrivateKey, deviceEndEntityCert, bootstrapTrustAnchorCert string) *Client {
@@ -48,72 +55,74 @@ const (
 	POST = "post"
 )
 
-func (a *Client) RunBootstrapSequence() error {
+func (a *Client) RunBootstrapSequence(ctx context.Context) (CompletionReport, error) {
+	if err := ctx.Err(); err != nil {
+		return CompletionReport{}, err
+	}
 	var bootstrapError error
 	var errMessage string
 
 	deviceErr := a.getDeviceInformation()
 	if deviceErr != nil {
-		a.Logger.Warn("Error getting device information: ", "error", deviceErr)
+		a.Logger.Warn("Error getting device information", "error", deviceErr)
 	}
 	// TODO: fail if we don't have serial number?
 
-	bootstrapError = a.getRestconfLink()
+	bootstrapError = a.getRestconfLink(ctx)
 	if bootstrapError != nil {
-		errMessage = "failed to get host metadata: " + bootstrapError.Error()
-		return errors.New(errMessage)
+		return CompletionReport{}, fmt.Errorf("failed to get host metadata: %w", bootstrapError)
 	}
 
-	bootstrapError = a.getBootstrappingData()
+	onboarding, bootstrapError := a.getBootstrappingData(ctx)
 	if bootstrapError != nil {
 		errMessage = "failed to request bootstrap server onboarding info: " + bootstrapError.Error()
-		a.postProgress(ProgressTypeBootstrapError, errMessage)
-		return errors.New(errMessage)
+		a.postProgress(ctx, ProgressTypeBootstrapError, errMessage)
+		return CompletionReport{}, fmt.Errorf("failed to request bootstrap server onboarding info: %w", bootstrapError)
 	}
 
-	bootstrapError = a.getBootstrapRedirect()
-	if bootstrapError != nil {
-		errMessage = "failed to handle bootstrap redirect: " + bootstrapError.Error()
-		a.postProgress(ProgressTypeBootstrapError, errMessage)
-		return errors.New(errMessage)
+	if !onboarding {
+		bootstrapError = a.getBootstrapRedirect(ctx)
+		if bootstrapError != nil {
+			errMessage = "failed to handle bootstrap redirect: " + bootstrapError.Error()
+			a.postProgress(ctx, ProgressTypeBootstrapError, errMessage)
+			return CompletionReport{}, fmt.Errorf("failed to handle bootstrap redirect: %w", bootstrapError)
+		}
 	}
 
 	// TODO: Download the boot image
 
-	bootstrapError = a.getConfigurationFile()
+	onboardingDir, bootstrapError := a.prepareOnboardingArtifacts(ctx)
 	if bootstrapError != nil {
-		errMessage = "failed to copy configuration file: " + bootstrapError.Error()
-		a.postProgress(ProgressTypeBootstrapError, errMessage)
-		return errors.New(errMessage)
+		errMessage = "failed to prepare onboarding files: " + bootstrapError.Error()
+		a.postProgress(ctx, ProgressTypeBootstrapError, errMessage)
+		return CompletionReport{}, errors.New(errMessage)
 	}
 
-	bootstrapError = a.runConfiguration(PRE)
+	bootstrapError = a.runConfiguration(ctx, PRE, onboardingDir)
 	if bootstrapError != nil {
-		a.Logger.Error("Error launching pre scripts: ", "error", bootstrapError)
-		a.postProgress(ProgressTypeBootstrapError, "Error launching pre scripts: "+bootstrapError.Error())
-		return bootstrapError
+		a.postProgress(ctx, ProgressTypeBootstrapError, "Error launching pre scripts: "+bootstrapError.Error())
+		return CompletionReport{}, fmt.Errorf("run pre configuration script: %w", bootstrapError)
 	}
 
-	bootstrapError = a.runConfiguration(POST)
+	bootstrapError = a.runConfiguration(ctx, POST, onboardingDir)
 	if bootstrapError != nil {
-		a.Logger.Error("Error launching post scripts: ", "error", bootstrapError)
-		a.postProgress(ProgressTypeBootstrapError, "Error launching post scripts: "+bootstrapError.Error())
-		return bootstrapError
+		a.postProgress(ctx, ProgressTypeBootstrapError, "Error launching post scripts: "+bootstrapError.Error())
+		return CompletionReport{}, fmt.Errorf("run post configuration script: %w", bootstrapError)
 	}
 
-	a.postProgress(ProgressTypeBootstrapComplete, "Bootstrap Complete")
-	return nil
+	report := CompletionReport{Endpoint: a.progressEndpoint(), SerialNumber: a.SerialNumber}
+	return report, report.Validate()
 }
 
-func (a *Client) getRestconfLink() error {
+func (a *Client) getRestconfLink(ctx context.Context) error {
 	url := a.BootstrapServerURL + "/.well-known/host-meta"
-	a.Logger.Debug("Getting root resources from URL:", "response", url)
+	a.Logger.Debug("Getting root resources", "url", url)
 
-	xrd, err := a.getHostMeta()
+	xrd, err := a.getHostMeta(ctx)
 	if err != nil {
 		return err
 	}
-	a.Logger.Debug("Response from the server: ", "response", xrd)
+	a.Logger.Debug("Host metadata received", "response", xrd)
 
 	if len(xrd.Links) == 0 {
 		return errors.New("no links found in the root resource response")
@@ -131,86 +140,136 @@ func (a *Client) getRestconfLink() error {
 	return nil
 }
 
-func (a *Client) getBootstrapRedirect() error {
-	if reflect.ValueOf(a.BootstrapServerRedirectInfo).IsZero() {
-		return nil
+func (a *Client) getBootstrapRedirect(ctx context.Context) error {
+	servers := a.BootstrapServerRedirectInfo.IetfSztpConveyedInfoRedirectInformation.BootstrapServer
+	if len(servers) == 0 {
+		return errors.New("redirect information contains no bootstrap server")
 	}
 
 	a.Logger.Info("Redirecting to bootstrap server")
 
 	// TODO: BootstrapServer can be an array
 	// TODO: do not ignore BootstrapServer[0].TrustAnchor
-	addr := a.BootstrapServerRedirectInfo.IetfSztpConveyedInfoRedirectInformation.BootstrapServer[0].Address
-	port := a.BootstrapServerRedirectInfo.IetfSztpConveyedInfoRedirectInformation.BootstrapServer[0].Port
-
-	if addr == "" {
-		return errors.New("invalid redirect address")
+	redirectURL, err := normalizeRedirectAddress(servers[0].Address, servers[0].Port)
+	if err != nil {
+		return fmt.Errorf("invalid bootstrap redirect: %w", err)
 	}
-	if port <= 0 {
-		return errors.New("invalid port")
-	}
-
-	// Use (force) HTTPS for the request
-	if strings.HasPrefix(addr, "http://") {
-		addr = "https://" + strings.TrimPrefix(addr, "http://")
-	} else if !strings.HasPrefix(addr, "https://") {
-		addr = "https://" + addr
-	}
-	// Change URL to point to new redirect IP and PORT
-	a.BootstrapServerURL = addr + ":" + strconv.Itoa(port)
+	a.BootstrapServerURL = redirectURL
 
 	// Request onboard info again (with new URL now)
-	return a.getBootstrappingData()
-}
-
-func (a *Client) getBootstrappingData() error {
-
-	url := a.BootstrapServerURL + a.BootstrapServerRestconfLink.Href + "/operations/ietf-sztp-bootstrap-server:get-bootstrapping-data"
-
-	res, err := a.postRequest(a.InputJSONContent, url, false, http.StatusOK)
+	onboarding, err := a.getBootstrappingData(ctx)
 	if err != nil {
 		return err
 	}
+	if !onboarding {
+		return errors.New("redirect response did not contain onboarding information")
+	}
+	return nil
+}
 
-	a.Logger.Debug("Response from the server: ", "response", res)
+// normalizeRedirectAddress accepts a host or URL and a separate authoritative
+// port. Both the original address and the resulting origin use shared validation.
+func normalizeRedirectAddress(address string, port int) (string, error) {
+	address = strings.TrimSpace(address)
+	if ip, err := netip.ParseAddr(address); err == nil && ip.Is6() {
+		address = "[" + address + "]"
+	}
+	origin, err := serveraddr.Normalize(address)
+	if err != nil {
+		return "", err
+	}
+	u, err := url.Parse(origin)
+	if err != nil {
+		return "", err
+	}
+	u.Host = net.JoinHostPort(u.Hostname(), strconv.Itoa(port))
+	return serveraddr.Normalize(u.String())
+}
 
-	a.postProgress(ProgressTypeBootstrapInitiated, "Bootstrap process initiated")
+func (a *Client) getBootstrappingData(ctx context.Context) (bool, error) {
+
+	url := a.BootstrapServerURL + a.BootstrapServerRestconfLink.Href + "/operations/ietf-sztp-bootstrap-server:get-bootstrapping-data"
+
+	res, err := a.postRequestWithContext(ctx, a.InputJSONContent, url, false, http.StatusOK)
+	if err != nil {
+		return false, err
+	}
+
+	a.Logger.Debug("Bootstrap response received", "response", res)
+
+	a.postProgress(ctx, ProgressTypeBootstrapInitiated, "Bootstrap process initiated")
 
 	crypto := res.IetfSztpBootstrapServerOutput.ConveyedInformation
 	newVal, err := base64.StdEncoding.DecodeString(crypto)
 	if err != nil {
-		return err
+		return false, err
 	}
 	ci, err := protocol.ParseContentInfo(newVal)
 	if err != nil {
-		return err
+		return false, err
 	}
 	var data asn1.RawValue
 	_, kerr := asn1.Unmarshal(ci.Content.Bytes, &data)
 	if kerr != nil {
-		return kerr
+		return false, kerr
 	}
 
-	res.IetfSztpBootstrapServerOutput.ConveyedInformation = string(data.Bytes)
-	decoderoi := json.NewDecoder(bytes.NewReader(data.Bytes))
-	decoderoi.DisallowUnknownFields()
-	var oi BootstrapServerOnboardingInfo
-	erroi := decoderoi.Decode(&oi)
-	if erroi == nil {
+	return a.decodeConveyedInformation(data.Bytes)
+}
+
+// Envelope presence is independent of its contents: an explicit empty onboarding
+// object is valid, but a missing or null envelope must never mark a device done.
+func (a *Client) decodeConveyedInformation(data []byte) (bool, error) {
+	a.BootstrapServerOnboardingInfo = BootstrapServerOnboardingInfo{}
+	a.BootstrapServerRedirectInfo = BootstrapServerRedirectInfo{}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	start, err := decoder.Token()
+	if err != nil {
+		return false, err
+	}
+	if start != json.Delim('{') || !decoder.More() {
+		return false, errors.New("expected exactly one onboarding-information or redirect-information envelope")
+	}
+	name, err := decoder.Token()
+	if err != nil {
+		return false, err
+	}
+	var contents json.RawMessage
+	if err := decoder.Decode(&contents); err != nil {
+		return false, err
+	}
+	// Count members before decoding into a map or struct can merge duplicate keys.
+	if decoder.More() {
+		return false, errors.New("expected exactly one onboarding-information or redirect-information envelope")
+	}
+	if _, err := decoder.Token(); err != nil { // Closing object delimiter.
+		return false, err
+	}
+	if _, err := decoder.Token(); err != io.EOF {
+		return false, errors.New("unexpected data after conveyed-information envelope")
+	}
+	if bytes.Equal(bytes.TrimSpace(contents), []byte("null")) {
+		return false, errors.New("conveyed-information envelope must not be null")
+	}
+	decoder = json.NewDecoder(bytes.NewReader(contents))
+	decoder.DisallowUnknownFields()
+	switch name {
+	case "ietf-sztp-conveyed-info:onboarding-information":
+		var oi BootstrapServerOnboardingInfo
+		if err := decoder.Decode(&oi.IetfSztpConveyedInfoOnboardingInformation); err != nil {
+			return false, err
+		}
 		a.BootstrapServerOnboardingInfo = oi
-		a.Logger.Debug("The BootstrapServerOnBoardingInfo object retrieved is: ", "response", a.BootstrapServerOnboardingInfo)
-		return nil
-	}
-
-	decoderri := json.NewDecoder(bytes.NewReader(data.Bytes))
-	decoderri.DisallowUnknownFields()
-	var ri BootstrapServerRedirectInfo
-	errri := decoderri.Decode(&ri)
-	if errri == nil {
+		a.Logger.Debug("Onboarding information received", "response", a.BootstrapServerOnboardingInfo)
+		return true, nil
+	case "ietf-sztp-conveyed-info:redirect-information":
+		var ri BootstrapServerRedirectInfo
+		if err := decoder.Decode(&ri.IetfSztpConveyedInfoRedirectInformation); err != nil {
+			return false, err
+		}
 		a.BootstrapServerRedirectInfo = ri
-		a.Logger.Debug("The BootstrapServerRedirectInfo object retrieved is: ", "error", a.BootstrapServerRedirectInfo)
-		return nil
+		a.Logger.Debug("Redirect information received", "response", a.BootstrapServerRedirectInfo)
+		return false, nil
 	}
-
-	return errri
+	return false, errors.New("expected onboarding-information or redirect-information envelope")
 }

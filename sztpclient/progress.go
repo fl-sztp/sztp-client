@@ -10,10 +10,20 @@
 package sztpclient
 
 import (
+	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
+	"os"
 )
+
+// ErrReportCredentials indicates a local configuration failure, not a server
+// outage. The caller should stop and retain the pending report for the next run.
+var ErrReportCredentials = errors.New("invalid completion report credentials")
 
 type ProgressType int64
 
@@ -124,25 +134,73 @@ type ProgressJSON struct {
 	} `json:"ietf-sztp-bootstrap-server:input"`
 }
 
-func (a *Client) postProgress(s ProgressType, message string) {
-	a.Logger.Debug(fmt.Sprintf("Starting the Report Progress request for type: %s, message: %s", s, message))
-	url := a.BootstrapServerURL + a.BootstrapServerRestconfLink.Href + "/operations/ietf-sztp-bootstrap-server:report-progress"
+// CompletionReport contains only the identity and final endpoint needed to
+// resume reporting after local provisioning has completed. It contains no keys
+// or passwords; callers supply current credentials when sending it.
+type CompletionReport struct {
+	Endpoint     string `json:"endpoint"`
+	SerialNumber string `json:"serial_number"`
+}
+
+func (r CompletionReport) Validate() error {
+	u, err := url.Parse(r.Endpoint)
+	if err != nil || u.Scheme != "https" || u.Hostname() == "" || u.User != nil || u.Fragment != "" {
+		return errors.New("completion report requires an absolute HTTPS endpoint without userinfo or fragment")
+	}
+	return nil
+}
+
+func (a *Client) progressEndpoint() string {
+	return a.BootstrapServerURL + a.BootstrapServerRestconfLink.Href + "/operations/ietf-sztp-bootstrap-server:report-progress"
+}
+
+// ReportCompletion makes one bounded attempt. Local completion must be saved
+// by the caller before this method is invoked.
+func (a *Client) ReportCompletion(ctx context.Context, report CompletionReport) error {
+	if err := report.Validate(); err != nil {
+		return err
+	}
+	if a.DevicePassword == "" {
+		return fmt.Errorf("%w: device password is required", ErrReportCredentials)
+	}
+	if _, err := tls.LoadX509KeyPair(a.DeviceEndEntityCert, a.DevicePrivateKey); err != nil {
+		return fmt.Errorf("%w: %w", ErrReportCredentials, err)
+	}
+	ca, err := os.ReadFile(a.BootstrapTrustAnchorCert)
+	if err != nil {
+		return fmt.Errorf("%w: %w", ErrReportCredentials, err)
+	}
+	if !x509.NewCertPool().AppendCertsFromPEM(ca) {
+		return fmt.Errorf("%w: trust anchor contains no certificates", ErrReportCredentials)
+	}
+	client := *a
+	client.SerialNumber = report.SerialNumber
+	return client.sendProgress(ctx, report.Endpoint, ProgressTypeBootstrapComplete, "Bootstrap Complete")
+}
+
+func (a *Client) postProgress(ctx context.Context, s ProgressType, message string) {
+	if err := a.sendProgress(ctx, a.progressEndpoint(), s, message); err != nil {
+		a.Logger.Warn("Progress report failed", "progress_type", s.String(), "error", err)
+	}
+}
+
+func (a *Client) sendProgress(ctx context.Context, endpoint string, s ProgressType, message string) error {
+	a.Logger.Debug("Starting progress report", "progress_type", s.String(), "report_message", message)
 	var p ProgressJSON
 	p.IetfSztpBootstrapServerInput.ProgressType = s.String()
 	p.IetfSztpBootstrapServerInput.Message = message
 
 	progressJSON, err := json.Marshal(p)
 	if err != nil {
-		a.Logger.Error(fmt.Sprintf("Error marshalling the progress JSON: %s", err.Error()))
-		return
+		return err
 	}
 
-	res, err := a.postRequest(string(progressJSON), url, true, http.StatusNoContent)
+	res, err := a.postRequestWithContext(ctx, string(progressJSON), endpoint, true, http.StatusNoContent)
 	if err != nil {
-		a.Logger.Error(fmt.Sprintf("Error doing the report for %s: %s", message, err.Error()))
-		return
+		return err
 	}
 
-	a.Logger.Debug("Response from the server: ", "response", res)
-	a.Logger.Debug(fmt.Sprintf("Report Progress request completed successfully for %s", message))
+	a.Logger.Debug("Progress response received", "response", res)
+	a.Logger.Debug("Progress report completed", "progress_type", s.String())
+	return nil
 }

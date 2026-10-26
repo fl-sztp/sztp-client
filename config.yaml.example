@@ -1,7 +1,11 @@
+# SPDX-FileCopyrightText: 2025 Anssi Söderena <https://github.com/asode>
+# SPDX-License-Identifier: Apache-2.0
+
 server: "xverse.fusionlayer.com:9090"
 insecure: false
 debug: false
-tmp: "/tmp"
+tmp: "" # Parent for a private workspace; removed after the run. Empty uses system tmp.
+state-dir: "/var/lib/sztp-client" # Persistent local completion and pending final report state.
 serial: "device-serial-number"
 password: "device-password"
 private-key: "./certs/device_private_key.pem"

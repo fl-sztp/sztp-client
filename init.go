@@ -9,6 +9,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"fl-sztp-client/serveraddr"
@@ -28,6 +29,8 @@ type Config struct {
 	DiscoverOnly          bool              `yaml:"-"`
 	DiscoveryProtocol     discoveryProtocol `yaml:"-"`
 	DiscoverStopOnSuccess bool              `yaml:"-"`
+	ResetOnboarding       bool              `yaml:"-"`
+	StateDir              string            `yaml:"state-dir"`
 	configLoadErr         error
 	ServerSource          string `yaml:"-"`
 	SerialSource          string `yaml:"-"`
@@ -68,7 +71,9 @@ func getConfig() (*Config, error) {
 	discoverOnlyDHCP4Flag := flag.Bool("discover-only-dhcp4", false, "Test only DHCPv4 discovery and report device information and configured certificates without bootstrapping")
 	discoverOnlyDHCP6Flag := flag.Bool("discover-only-dhcp6", false, "Test only DHCPv6 discovery and report device information and configured certificates without bootstrapping")
 	discoverStopOnSuccessFlag := flag.Bool("discover-stop-on-success", false, "Stop DHCP probes after the first accepted bootstrap server address; requires a discover-only mode")
-	tmpFolder := flag.String("tmp", "", "Specify the temporary folder")
+	resetOnboardingFlag := flag.Bool("reset-onboarding", false, "Remove the local onboarding completion state and exit without bootstrapping")
+	stateDirFlag := flag.String("state-dir", "", "Persistent onboarding state directory (default: /var/lib/sztp-client; must be absolute)")
+	tmpFolder := flag.String("tmp", "", "Specify the temporary folder (default/fallback: private folder with a UTC timestamp and random suffix under the system temporary directory)")
 	deviceSerialNumber := flag.String("serial", "", "Specify the device serial number")
 	devicePassword := flag.String("password", "", "Specify the device password")
 	devicePrivateKey := flag.String("private-key", "", "Specify the device private key")
@@ -78,9 +83,13 @@ func getConfig() (*Config, error) {
 
 	flag.Parse()
 	configExplicit := false
+	stateDirExplicit := false
 	flag.Visit(func(f *flag.Flag) {
 		if f.Name == "config" {
 			configExplicit = true
+		}
+		if f.Name == "state-dir" {
+			stateDirExplicit = true
 		}
 	})
 	discoveryMode := ""
@@ -104,6 +113,9 @@ func getConfig() (*Config, error) {
 	}
 	if *discoverStopOnSuccessFlag && discoveryMode == "" {
 		return nil, fmt.Errorf("--discover-stop-on-success requires --discover-only, --discover-only-dhcp4, or --discover-only-dhcp6")
+	}
+	if discoveryMode != "" && *resetOnboardingFlag {
+		return nil, fmt.Errorf("--reset-onboarding cannot be combined with %s", discoveryMode)
 	}
 
 	// Load configuration from file if provided
@@ -132,6 +144,21 @@ func getConfig() (*Config, error) {
 	config.DiscoverOnly = discoveryMode != ""
 	config.DiscoveryProtocol = protocol
 	config.DiscoverStopOnSuccess = *discoverStopOnSuccessFlag
+	config.ResetOnboarding = *resetOnboardingFlag
+	if stateDirExplicit {
+		config.StateDir = *stateDirFlag
+		if config.StateDir == "" && !config.DiscoverOnly {
+			return nil, fmt.Errorf("--state-dir must not be empty")
+		}
+	} else if config.StateDir == "" {
+		config.StateDir = defaultStateDir
+	}
+	if !config.DiscoverOnly {
+		if !filepath.IsAbs(config.StateDir) {
+			return nil, fmt.Errorf("state directory must be an absolute path: %q", config.StateDir)
+		}
+		config.StateDir = filepath.Clean(config.StateDir)
+	}
 
 	// Override configuration with command-line flags if provided
 	if *serverFlag != "" {
@@ -164,11 +191,6 @@ func getConfig() (*Config, error) {
 
 	if config.DiscoverOnly {
 		if err := normalizeConfigServer(&config); err != nil {
-			return nil, err
-		}
-	}
-	if !config.DiscoverOnly {
-		if err := validateBootstrapConfig(&config); err != nil {
 			return nil, err
 		}
 	}

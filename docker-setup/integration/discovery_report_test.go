@@ -40,7 +40,7 @@ func startDiscoveryClient(t *testing.T, work string, c *integrationCase) (*clien
 	if mode == "" {
 		mode = "--discover-only"
 	}
-	args := []string{mode, "--debug", "--tmp", filepath.Join(work, "must-not-be-created")}
+	args := []string{mode, "--debug", "--tmp", filepath.Join(work, "must-not-be-created"), "--state-dir", filepath.Join(work, "state-must-not-be-created")}
 	if r.stopOnSuccess {
 		args = append(args, "--discover-stop-on-success")
 	}
@@ -161,6 +161,9 @@ func (p *clientProcess) awaitDiscoveryReport(ctx context.Context, c integrationC
 	}
 	if _, err := os.Stat(filepath.Join(work, "must-not-be-created")); !os.IsNotExist(err) {
 		return fmt.Errorf("discovery mode touched its tmp folder: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(work, "state-must-not-be-created")); !os.IsNotExist(err) {
+		return fmt.Errorf("discovery mode touched its state folder: %v", err)
 	}
 	return nil
 }

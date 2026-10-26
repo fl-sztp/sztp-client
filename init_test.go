@@ -12,6 +12,16 @@ import (
 	"testing"
 )
 
+// Bootstrap validation now happens after the persistent-state check. Existing
+// configuration tests exercise that validation without filesystem state.
+func getConfigForBootstrapTest() (*Config, error) {
+	config, err := getConfig()
+	if err == nil && !config.DiscoverOnly && !config.ResetOnboarding {
+		err = validateBootstrapConfig(config)
+	}
+	return config, err
+}
+
 func TestConfigFileValues(t *testing.T) {
 	for _, tt := range []struct {
 		name, insecure, debug   string
@@ -143,7 +153,7 @@ func TestConfigServerNormalization(t *testing.T) {
 				os.Args = previousArgs
 			})
 
-			config, err := getConfig()
+			config, err := getConfigForBootstrapTest()
 			if tt.wantErr {
 				if err == nil || !strings.Contains(err.Error(), "invalid server address") {
 					t.Fatalf("getConfig() error = %v, want contextual invalid server address error", err)
@@ -163,6 +173,48 @@ func TestConfigServerNormalization(t *testing.T) {
 	}
 }
 
-func getConfigForBootstrapTest() (*Config, error) {
-	return getConfig()
+func TestConfigTmpFolder(t *testing.T) {
+	for _, tc := range []struct {
+		name, yamlTmp, cliTmp, want string
+		useCLI, discoverOnly        bool
+	}{
+		{name: "omitted tmp selects automatic default"},
+		{name: "empty YAML tmp selects automatic default", yamlTmp: "tmp: \"\"\n"},
+		{name: "YAML tmp is preserved", yamlTmp: "tmp: requested-yaml\n", want: "requested-yaml"},
+		{name: "CLI overrides YAML", yamlTmp: "tmp: requested-yaml\n", useCLI: true, cliTmp: "requested-cli", want: "requested-cli"},
+		{name: "empty CLI preserves YAML", yamlTmp: "tmp: requested-yaml\n", useCLI: true, want: "requested-yaml"},
+		{name: "discovery uses automatic default without creating it", discoverOnly: true},
+		{name: "discovery preserves configured tmp without creating it", discoverOnly: true, useCLI: true, cliTmp: "requested-discovery", want: "requested-discovery"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			t.Chdir(root)
+			t.Setenv("TMPDIR", filepath.Join(root, "automatic-parent"))
+			fixture := tc.yamlTmp + "password: test-password\nprivate-key: key.pem\nend-entity-cert: cert.pem\ntrust-anchor-cert: ca.pem\n"
+			if err := os.WriteFile("config.yaml", []byte(fixture), 0600); err != nil {
+				t.Fatal(err)
+			}
+			previousFlags, previousArgs := flag.CommandLine, os.Args
+			flag.CommandLine = flag.NewFlagSet("tmp-config-test", flag.ContinueOnError)
+			os.Args = []string{"tmp-config-test", "--config", "config.yaml"}
+			if tc.useCLI {
+				os.Args = append(os.Args, "--tmp", tc.cliTmp)
+			}
+			if tc.discoverOnly {
+				os.Args = append(os.Args, "--discover-only")
+			}
+			t.Cleanup(func() { flag.CommandLine, os.Args = previousFlags, previousArgs })
+			config, err := getConfigForBootstrapTest()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if config.TmpFolder != tc.want || config.DiscoverOnly != tc.discoverOnly {
+				t.Fatalf("tmp=%q discover-only=%v, want %q/%v", config.TmpFolder, config.DiscoverOnly, tc.want, tc.discoverOnly)
+			}
+			entries, err := os.ReadDir(root)
+			if err != nil || len(entries) != 1 || entries[0].Name() != "config.yaml" {
+				t.Fatalf("configuration parsing created files: %v (%v)", entries, err)
+			}
+		})
+	}
 }

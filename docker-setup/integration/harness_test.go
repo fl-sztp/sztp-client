@@ -286,6 +286,7 @@ type clientProcess struct {
 func startClient(work, key, cert string) (*clientProcess, error) {
 	return startClientProcess(work, []string{
 		"--config", "", "--debug", "--insecure", "--tmp", work,
+		"--state-dir", filepath.Join(work, "onboarding-state"),
 		"--serial", "docker-test", "--password", "test-only",
 		"--private-key", key, "--end-entity-cert", cert, "--trust-anchor-cert", cert}, nil)
 }
