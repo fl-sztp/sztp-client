@@ -8,3 +8,8 @@ certs/
 config.yaml
 __debug*
 *configuration.sh
+
+# Local build binaries
+/sztp-client
+/fl-sztp-client
+/sztp-client-linux-*

@@ -1,3 +1,11 @@
+# SPDX-FileCopyrightText: 2022-2023 Dell Inc, or its subsidiaries.
+# SPDX-FileCopyrightText: 2025 Anssi Söderena <https://github.com/asode> (modifications)
+# SPDX-License-Identifier: Apache-2.0
+
+# Derived from the OPI Project's docker-compose.yml and docker-compose.dpu.yml:
+# https://github.com/opiproject/sztp/blob/65e62d163ec6d1bc6eead4b82229e949baae1fbf/docker-compose.yml
+# https://github.com/opiproject/sztp/blob/65e62d163ec6d1bc6eead4b82229e949baae1fbf/docker-compose.dpu.yml
+
 services:
   dhcpd:
     image: docker.io/networkboot/dhcpd:1.3.0
@@ -35,11 +43,24 @@ services:
     build:
       context: ../ # This context points to the root where your Go code is located
       dockerfile: docker-setup/Dockerfile # Dockerfile is in docker-setup
+    volumes:
+      - type: bind
+        source: ../config.yaml
+        target: /root/config.yaml
+        read_only: true
+        bind:
+          create_host_path: false
+      - type: bind
+        source: ../certs
+        target: /root/certs
+        read_only: true
+        bind:
+          create_host_path: false
     networks:
       - fl-sztp_network
     cap_add:
       - CAP_NET_ADMIN
-    command: sh -c "ls -l /root/ && \ ls -l /usr/local/bin/ && \ /usr/local/bin/fl-sztp-client --debug --insecure --serial first-serial-number --private-key /app/certs/first_private_key.pem --end-entity-cert /app/certs/first_my_cert.pem --trust-anchor-cert /app/certs/opi.pem && \ bash"
+    command: sh -c "ls -l /root/ && \ ls -l /usr/local/bin/ && \ /usr/local/bin/fl-sztp-client --debug --insecure --serial first-serial-number --private-key /root/certs/first_private_key.pem --end-entity-cert /root/certs/first_my_cert.pem --trust-anchor-cert /root/certs/opi.pem && \ bash"
     depends_on:
       - dhcpd
 

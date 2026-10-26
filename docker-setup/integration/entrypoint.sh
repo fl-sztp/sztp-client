@@ -1,19 +1,7 @@
 #!/bin/sh
 
+# SPDX-FileCopyrightText: 2026 Anssi Söderena <https://github.com/asode>
 # SPDX-License-Identifier: Apache-2.0
-# Copyright (C) 2026 Anssi Söderena
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-# http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 
 set -eu
 
@@ -63,6 +51,10 @@ case "$role" in
         exec /usr/local/bin/dhcp-fixture
         ;;
     tester)
+        /usr/local/bin/client.test -test.v -test.timeout=90s
+        /usr/local/bin/device.test -test.v -test.timeout=30s
+        /usr/local/bin/dhcp.test -test.v -test.timeout=30s
+        /usr/local/bin/serveraddr.test -test.v -test.timeout=30s
         /usr/local/bin/control.test -test.v -test.timeout=30s
         /usr/local/bin/fixture.test -test.v -test.timeout=30s
         exec /usr/local/bin/dhcp-integration.test -test.v -test.timeout=5m "$@"

@@ -1,0 +1,18 @@
+# Include only application sources and required build inputs.
+**
+!*.go
+!dhcpclient/*.go
+!serveraddr/*.go
+!sztpclient/*.go
+!internal/logging/*.go
+!go.mod
+!go.sum
+!LICENSE
+!COPYING
+!NOTICE
+!docker-setup/collect-licenses.sh
+
+# Tests and hidden local files are outside the production context.
+**/*_test.go
+**/.*
+**/.*/**

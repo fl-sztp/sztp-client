@@ -1,6 +1,6 @@
 module fl-sztp-client
 
-go 1.27.1
+go 1.27.0
 
 require (
 	github.com/github/smimesign v0.2.0

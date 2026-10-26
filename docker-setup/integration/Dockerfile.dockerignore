@@ -1,21 +1,21 @@
-# Send only Go source, module metadata, and the container entrypoint.
+# Include application and integration-test sources and required build inputs.
 **
-!**/*.go
+!*.go
+!dhcpclient/*.go
+!serveraddr/*.go
+!sztpclient/*.go
+!internal/logging/*.go
 !go.mod
 !go.sum
+!LICENSE
+!COPYING
+!NOTICE
+!docker-setup/collect-licenses.sh
+!docker-setup/integration/*.go
+!docker-setup/integration/fixture/*.go
+!docker-setup/integration/internal/control/*.go
 !docker-setup/integration/entrypoint.sh
 
-# Never include sensitive or generated directories, even if they contain Go.
-**/.git
-**/.aws
-**/.codex
-**/.agents
-**/.env*
-**/certs
-**/*.pem
-**/config.yaml
-**/tmp
-**/node_modules
-**/vendor
+# Exclude hidden local files at every directory level.
 **/.*
 **/.*/**
