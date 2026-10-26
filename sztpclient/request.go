@@ -1,22 +1,11 @@
-/*
-SPDX-License-Identifier: Apache-2.0
-Copyright (C) 2022-2023 Intel Corporation
-Copyright (c) 2022 Dell Inc, or its subsidiaries
-Copyright (C) 2022 Red Hat
-Copyright (C) 2025 Anssi Söderena, Sandip Ghimire
+// SPDX-FileCopyrightText: 2022-2023 Intel Corporation
+// SPDX-FileCopyrightText: 2022 Dell Inc, or its subsidiaries
+// SPDX-FileCopyrightText: 2022 Red Hat
+// SPDX-FileCopyrightText: 2025 Anssi Söderena <https://github.com/asode>
+// SPDX-FileCopyrightText: 2025 Sandip Ghimire <https://github.com/sandip-ghimire>
+// SPDX-License-Identifier: Apache-2.0
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Modified for sztp-client.
 
 package sztpclient
 
@@ -90,7 +79,7 @@ func (a *Client) postRequest(input string, url string, empty bool, expectedStatu
 	var postResponse BootstrapServerPostOutput
 	var errorResponse BootstrapServerErrorOutput
 
-	a.Logger.Debugf("Starting the request to %s with input: %s", url, input)
+	a.Logger.Debug(fmt.Sprintf("Starting the request to %s with input: %s", url, input))
 
 	body := strings.NewReader(input)
 	r, err := http.NewRequest(http.MethodPost, url, body)
@@ -118,18 +107,15 @@ func (a *Client) postRequest(input string, url string, empty bool, expectedStatu
 	}
 	res, err := client.Do(r)
 	if err != nil {
-		a.Logger.Error("Error doing the request", err.Error())
 		return nil, err
 	}
 	defer func() {
 		if err := res.Body.Close(); err != nil {
-			a.Logger.Error("Error when closing:", err)
 		}
 	}()
 
 	bodyBytes, err := io.ReadAll(res.Body)
 	if err != nil {
-		a.Logger.Error("Error reading the request", err.Error())
 		return nil, err
 	}
 
@@ -142,8 +128,7 @@ func (a *Client) postRequest(input string, url string, empty bool, expectedStatu
 			errdecoder.DisallowUnknownFields()
 			eerr := errdecoder.Decode(&errorResponse)
 			if eerr != nil {
-				a.Logger.Error("Received unknown response", string(bodyBytes))
-				return nil, derr
+				return nil, fmt.Errorf("%w; response body: %s", derr, bodyBytes)
 			}
 			if len(errorResponse.IetfRestconfErrors.Error) > 0 {
 				errDetails := errorResponse.IetfRestconfErrors.Error[0]

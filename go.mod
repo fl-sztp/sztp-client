@@ -6,7 +6,6 @@ require (
 	github.com/github/smimesign v0.2.0
 	github.com/insomniacslk/dhcp v0.0.0-20260901064844-234b97448fae
 	github.com/jaypipes/ghw v0.26.0
-	github.com/sirupsen/logrus v1.10.2
 	go.yaml.in/yaml/v3 v3.0.5
 	golang.org/x/net v0.59.0
 	gopkg.in/ini.v1 v1.67.3

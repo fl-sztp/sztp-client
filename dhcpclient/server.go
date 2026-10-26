@@ -1,46 +1,32 @@
-/*
-SPDX-License-Identifier: Apache-2.0
-Copyright (C) 2025 Anssi Söderena, Sandip Ghimire
-Modifications Copyright (C) 2026 Anssi Söderena
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// SPDX-FileCopyrightText: 2025 Anssi Söderena <https://github.com/asode>
+// SPDX-FileCopyrightText: 2025 Sandip Ghimire <https://github.com/sandip-ghimire>
+// SPDX-FileCopyrightText: 2026 Anssi Söderena <https://github.com/asode> (modifications)
+// SPDX-License-Identifier: Apache-2.0
 
 package dhcpclient
 
 import (
 	"encoding/binary"
 	"fmt"
+	"log/slog"
 	"unicode/utf8"
 
 	"fl-sztp-client/serveraddr"
-
-	"github.com/sirupsen/logrus"
 )
 
 // serverFromOption accepts textual addresses and length-prefixed URI lists.
-func serverFromOption(logger *logrus.Logger, iface string, option int, data []byte, present bool) string {
-	entry := logger.WithFields(logrus.Fields{"interface": iface, "option": option})
+func serverFromOption(logger *slog.Logger, iface string, option int, data []byte, present bool) string {
+	entry := logger.With("interface", iface, "option", option)
 	if !present {
 		entry.Warn("Bootstrap server option not found in DHCP response")
 		return ""
 	}
 	server, err := serverFromOptionData(data)
 	if err != nil {
-		entry.WithError(err).Warn("Invalid bootstrap server address in DHCP option")
+		entry.Warn("Invalid bootstrap server address in DHCP option", "error", err)
 		return ""
 	}
-	entry.Info("Bootstrap server address discovered via DHCP: ", server)
+	entry.Info("Bootstrap server address discovered via DHCP", "server", server)
 	return server
 }
 

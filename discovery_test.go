@@ -1,35 +1,21 @@
-/*
-SPDX-License-Identifier: Apache-2.0
-Copyright (C) 2026 Anssi Söderena
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// SPDX-FileCopyrightText: 2026 Anssi Söderena <https://github.com/asode>
+// SPDX-License-Identifier: Apache-2.0
 
 package main
 
 import (
 	"errors"
 	"io"
+	"log/slog"
 	"reflect"
 	"testing"
 	"time"
 
-	"github.com/sirupsen/logrus"
+	"fl-sztp-client/internal/logging"
 )
 
-func discoveryTestLogger() *logrus.Logger {
-	logger := logrus.New()
-	logger.SetOutput(io.Discard)
+func discoveryTestLogger() *slog.Logger {
+	logger := logging.New(io.Discard, false)
 	return logger
 }
 
@@ -40,7 +26,7 @@ func TestDiscoverServerOnce(t *testing.T) {
 		v6Err, v4Err                   error
 		wantV4                         bool
 	}{
-		{name: "v6 success skips v4", v6Server: "https://v6.example", want: "https://v6.example"},
+		{name: "v6 success skips v4", v6Server: "https://v6.example", v4Server: "https://v4.example", want: "https://v6.example"},
 		{name: "v6 empty uses v4", v4Server: "https://v4.example", want: "https://v4.example", wantV4: true},
 		{name: "v6 error uses v4", v6Err: failure, v4Server: "https://v4.example", want: "https://v4.example", wantV4: true},
 		{name: "v4 error", v4Err: failure, wantV4: true},
@@ -51,10 +37,10 @@ func TestDiscoverServerOnce(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			v6Calls, v4Calls := 0, 0
-			got := discoverServerOnce(discoveryTestLogger(), func(*logrus.Logger) (string, error) {
+			got := discoverServerOnce(discoveryTestLogger(), func(*slog.Logger) (string, error) {
 				v6Calls++
 				return tc.v6Server, tc.v6Err
-			}, func(*logrus.Logger) (string, error) {
+			}, func(*slog.Logger) (string, error) {
 				v4Calls++
 				return tc.v4Server, tc.v4Err
 			})
@@ -86,11 +72,11 @@ func TestDiscoverServerWithRetry(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			events := []string{}
 			round := 0
-			got := discoverServerWithRetry(discoveryTestLogger(), func(*logrus.Logger) (string, error) {
+			got := discoverServerWithRetry(discoveryTestLogger(), func(*slog.Logger) (string, error) {
 				round++
 				events = append(events, "v6")
 				return "", nil
-			}, func(*logrus.Logger) (string, error) {
+			}, func(*slog.Logger) (string, error) {
 				events = append(events, "v4")
 				if round == tc.successRound {
 					return "https://server.example", nil
@@ -118,10 +104,10 @@ func TestDiscoverServerWithRetry(t *testing.T) {
 
 func TestDiscoverServerWithRetryTenFailedRounds(t *testing.T) {
 	v6Calls, v4Calls, sleeps := 0, 0, 0
-	got := discoverServerWithRetry(discoveryTestLogger(), func(*logrus.Logger) (string, error) {
+	got := discoverServerWithRetry(discoveryTestLogger(), func(*slog.Logger) (string, error) {
 		v6Calls++
 		return "", nil
-	}, func(*logrus.Logger) (string, error) {
+	}, func(*slog.Logger) (string, error) {
 		v4Calls++
 		return "", nil
 	}, 10, time.Minute, func(delay time.Duration) {

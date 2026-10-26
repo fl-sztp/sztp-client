@@ -1,21 +1,7 @@
 //go:build linux && dhcp_integration
 
-/*
-SPDX-License-Identifier: Apache-2.0
-Copyright (C) 2026 Anssi Söderena
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// SPDX-FileCopyrightText: 2026 Anssi Söderena <https://github.com/asode>
+// SPDX-License-Identifier: Apache-2.0
 
 package integration
 
@@ -39,9 +25,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"runtime"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -51,7 +35,6 @@ import (
 )
 
 const productionBinary = "/usr/local/bin/fl-sztp-client"
-const retryMessage = "Retrying DHCP discovery in 1m0s..."
 
 type integrationDriver struct {
 	api       *fixtureAPI
@@ -322,31 +305,6 @@ func (p *clientProcess) stop() error {
 	return p.stopErr
 }
 
-// Logrus escapes URI/userinfo characters inside quoted msg fields. Parse the
-// complete field instead of accepting a substring or an incomplete log write.
-var logMessage = regexp.MustCompile(`(?:^| )msg=("(?:[^"\\]|\\.)*"|[^ ]+)(?: |$)`)
-
-func messages(log []byte) []string {
-	var out []string
-	lines := bytes.Split(log, []byte{'\n'})
-	for _, line := range lines[:len(lines)-1] {
-		match := logMessage.FindSubmatch(line)
-		if match == nil {
-			continue
-		}
-		message := string(match[1])
-		if strings.HasPrefix(message, `"`) {
-			decoded, err := strconv.Unquote(message)
-			if err != nil {
-				continue
-			}
-			message = decoded
-		}
-		out = append(out, message)
-	}
-	return out
-}
-
 func (p *clientProcess) awaitDiscovery(ctx context.Context, c integrationCase) error {
 	tick := time.NewTicker(20 * time.Millisecond)
 	defer tick.Stop()
@@ -362,11 +320,10 @@ func (p *clientProcess) awaitDiscovery(ctx context.Context, c integrationCase) e
 		default:
 		}
 		gotRetry := false
-		for _, message := range messages(p.stderr.snapshot()) {
-			if strings.HasPrefix(message, "Using server address:") {
-				want := "Using server address: " + c.want
-				if c.want == "" || message != want {
-					return fmt.Errorf("discovery marker %q, want %q", message, want)
+		for _, record := range logRecords(p.stderr.snapshot()) {
+			if record["event"] == "bootstrap_server_selected" {
+				if c.want == "" || record["server"] != c.want {
+					return fmt.Errorf("discovery server %q, want %q", record["server"], c.want)
 				}
 				if c.minuteRetry && !gotRetry {
 					return errors.New("second-round discovery lacked the real retry marker")
@@ -378,7 +335,10 @@ func (p *clientProcess) awaitDiscovery(ctx context.Context, c integrationCase) e
 					return nil
 				}
 			}
-			if message == retryMessage {
+			if record["event"] == "dhcp_retry_scheduled" {
+				if record["delay"] != time.Minute.String() {
+					return fmt.Errorf("discovery retry delay %q, want %s", record["delay"], time.Minute)
+				}
 				if c.want == "" {
 					select {
 					case <-p.done:
@@ -388,7 +348,7 @@ func (p *clientProcess) awaitDiscovery(ctx context.Context, c integrationCase) e
 					}
 				}
 				if !c.minuteRetry || gotRetry {
-					return fmt.Errorf("unexpected discovery retry: %s", message)
+					return fmt.Errorf("unexpected discovery retry: %v", record)
 				}
 				gotRetry = true
 			}

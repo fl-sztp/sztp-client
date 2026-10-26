@@ -1,40 +1,16 @@
-/*
-SPDX-License-Identifier: Apache-2.0
-Copyright (C) 2026 Anssi Söderena
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// SPDX-FileCopyrightText: 2026 Anssi Söderena <https://github.com/asode>
+// SPDX-License-Identifier: Apache-2.0
 
 package dhcpclient
 
 import (
 	"bytes"
-	"io"
 	"strings"
 	"testing"
 
 	"github.com/insomniacslk/dhcp/dhcpv4"
 	"github.com/insomniacslk/dhcp/dhcpv6"
-	"github.com/sirupsen/logrus"
 )
-
-func newURIOptionLogger() (*logrus.Logger, *optionLogHook) {
-	logger := logrus.New()
-	logger.SetOutput(io.Discard)
-	hook := &optionLogHook{}
-	logger.AddHook(hook)
-	return logger, hook
-}
 
 func TestServerFromOptionURIList(t *testing.T) {
 	const origin = "https://bootstrap:8080"
@@ -77,26 +53,23 @@ func TestServerFromOptionURIList(t *testing.T) {
 	for _, code := range []int{143, 136} {
 		for _, tt := range tests {
 			t.Run(fmtOptionName(code, tt.name), func(t *testing.T) {
-				logger, hook := newURIOptionLogger()
+				logger, output := newOptionLogger()
 				got := serverFromOption(logger, "eth-test", code, []byte(tt.data), true)
 				if got != tt.want {
 					t.Fatalf("got %q, want %q", got, tt.want)
 				}
-				if len(hook.entries) != 1 {
-					t.Fatalf("got %d log entries, want 1", len(hook.entries))
-				}
-				entry := hook.entries[0]
-				if entry.Data["interface"] != "eth-test" || entry.Data["option"] != code {
-					t.Errorf("missing interface or option fields: %v", entry.Data)
+				entry := readOptionLog(t, output)
+				if entry.Interface != "eth-test" || entry.Option != code {
+					t.Errorf("missing interface or option fields: %v", entry)
 				}
 				if tt.want == "" {
-					if entry.Level != logrus.WarnLevel || entry.Data["error"] == nil {
+					if entry.Level != "WARN" || entry.Error == "" {
 						t.Errorf("invalid option lacks warning or error: %v", entry)
 					}
 					if strings.Contains(entry.Message, "not found") {
 						t.Errorf("present option reported as missing: %s", entry.Message)
 					}
-				} else if entry.Level != logrus.InfoLevel || !strings.Contains(entry.Message, tt.want) {
+				} else if entry.Level != "INFO" || entry.Server != tt.want {
 					t.Errorf("success log lacks canonical origin: %v", entry)
 				}
 			})
@@ -127,7 +100,7 @@ func TestServerFromSplitDHCP4Option(t *testing.T) {
 	if !bytes.Equal(data, payload) {
 		t.Fatal("DHCPv4 option fragments were not reassembled")
 	}
-	logger, _ := newURIOptionLogger()
+	logger, _ := newOptionLogger()
 	got := serverFromOption(logger, "eth-test", 143, data, offer.Options.Has(code))
 	if got != origin {
 		t.Fatalf("got %q, want %q", got, origin)
@@ -151,7 +124,7 @@ func TestServerFromDHCP6OptionPayload(t *testing.T) {
 	if !bytes.Equal(option.ToBytes(), payload) {
 		t.Fatal("DHCPv6 option payload includes an outer header")
 	}
-	logger, _ := newURIOptionLogger()
+	logger, _ := newOptionLogger()
 	got := serverFromOption(logger, "eth-test", 136, option.ToBytes(), true)
 	if got != origin {
 		t.Fatalf("got %q, want %q", got, origin)

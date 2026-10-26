@@ -1,22 +1,11 @@
-/*
-SPDX-License-Identifier: Apache-2.0
-Copyright (C) 2022-2023 Intel Corporation
-Copyright (c) 2022 Dell Inc, or its subsidiaries
-Copyright (C) 2022 Red Hat
-Copyright (C) 2025 Anssi Söderena, Sandip Ghimire
+// SPDX-FileCopyrightText: 2022-2023 Intel Corporation
+// SPDX-FileCopyrightText: 2022 Dell Inc, or its subsidiaries
+// SPDX-FileCopyrightText: 2022 Red Hat
+// SPDX-FileCopyrightText: 2025 Anssi Söderena <https://github.com/asode>
+// SPDX-FileCopyrightText: 2025 Sandip Ghimire <https://github.com/sandip-ghimire>
+// SPDX-License-Identifier: Apache-2.0
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Modified for sztp-client.
 
 package sztpclient
 
@@ -32,10 +21,10 @@ import (
 	"strings"
 
 	"github.com/github/smimesign/ietf-cms/protocol"
-	"github.com/sirupsen/logrus"
+	"log/slog"
 )
 
-func NewClient(logger *logrus.Logger, allowInsecure bool, BootstrapServerURL, tmpFolder, serialNumber, devicePassword, devicePrivateKey, deviceEndEntityCert, bootstrapTrustAnchorCert string) *Client {
+func NewClient(logger *slog.Logger, allowInsecure bool, BootstrapServerURL, tmpFolder, serialNumber, devicePassword, devicePrivateKey, deviceEndEntityCert, bootstrapTrustAnchorCert string) *Client {
 	return &Client{
 		Logger:                        logger,
 		AllowInsecure:                 allowInsecure,
@@ -65,7 +54,7 @@ func (a *Client) RunBootstrapSequence() error {
 
 	deviceErr := a.getDeviceInformation()
 	if deviceErr != nil {
-		a.Logger.Warn("Error getting device information: ", deviceErr)
+		a.Logger.Warn("Error getting device information: ", "error", deviceErr)
 	}
 	// TODO: fail if we don't have serial number?
 
@@ -100,14 +89,14 @@ func (a *Client) RunBootstrapSequence() error {
 
 	bootstrapError = a.runConfiguration(PRE)
 	if bootstrapError != nil {
-		a.Logger.Error("Error launching pre scripts: ", bootstrapError)
+		a.Logger.Error("Error launching pre scripts: ", "error", bootstrapError)
 		a.postProgress(ProgressTypeBootstrapError, "Error launching pre scripts: "+bootstrapError.Error())
 		return bootstrapError
 	}
 
 	bootstrapError = a.runConfiguration(POST)
 	if bootstrapError != nil {
-		a.Logger.Error("Error launching post scripts: ", bootstrapError)
+		a.Logger.Error("Error launching post scripts: ", "error", bootstrapError)
 		a.postProgress(ProgressTypeBootstrapError, "Error launching post scripts: "+bootstrapError.Error())
 		return bootstrapError
 	}
@@ -118,13 +107,13 @@ func (a *Client) RunBootstrapSequence() error {
 
 func (a *Client) getRestconfLink() error {
 	url := a.BootstrapServerURL + "/.well-known/host-meta"
-	a.Logger.Debug("Getting root resources from URL:", url)
+	a.Logger.Debug("Getting root resources from URL:", "response", url)
 
 	xrd, err := a.getHostMeta()
 	if err != nil {
 		return err
 	}
-	a.Logger.Debug("Response from the server: ", xrd)
+	a.Logger.Debug("Response from the server: ", "response", xrd)
 
 	if len(xrd.Links) == 0 {
 		return errors.New("no links found in the root resource response")
@@ -183,7 +172,7 @@ func (a *Client) getBootstrappingData() error {
 		return err
 	}
 
-	a.Logger.Debug("Response from the server: ", res)
+	a.Logger.Debug("Response from the server: ", "response", res)
 
 	a.postProgress(ProgressTypeBootstrapInitiated, "Bootstrap process initiated")
 
@@ -209,7 +198,7 @@ func (a *Client) getBootstrappingData() error {
 	erroi := decoderoi.Decode(&oi)
 	if erroi == nil {
 		a.BootstrapServerOnboardingInfo = oi
-		a.Logger.Debug("The BootstrapServerOnBoardingInfo object retrieved is: ", a.BootstrapServerOnboardingInfo)
+		a.Logger.Debug("The BootstrapServerOnBoardingInfo object retrieved is: ", "response", a.BootstrapServerOnboardingInfo)
 		return nil
 	}
 
@@ -219,7 +208,7 @@ func (a *Client) getBootstrappingData() error {
 	errri := decoderri.Decode(&ri)
 	if errri == nil {
 		a.BootstrapServerRedirectInfo = ri
-		a.Logger.Debug("The BootstrapServerRedirectInfo object retrieved is: ", a.BootstrapServerRedirectInfo)
+		a.Logger.Debug("The BootstrapServerRedirectInfo object retrieved is: ", "error", a.BootstrapServerRedirectInfo)
 		return nil
 	}
 

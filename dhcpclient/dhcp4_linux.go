@@ -1,39 +1,26 @@
 //go:build linux
 // +build linux
 
-/*
-SPDX-License-Identifier: Apache-2.0
-Copyright (C) 2025 Anssi Söderena, Sandip Ghimire
-Modifications Copyright (C) 2026 Anssi Söderena
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// SPDX-FileCopyrightText: 2025 Anssi Söderena <https://github.com/asode>
+// SPDX-FileCopyrightText: 2025 Sandip Ghimire <https://github.com/sandip-ghimire>
+// SPDX-FileCopyrightText: 2026 Anssi Söderena <https://github.com/asode> (modifications)
+// SPDX-License-Identifier: Apache-2.0
 
 package dhcpclient
 
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"net"
 
 	"github.com/insomniacslk/dhcp/dhcpv4"
 	"github.com/insomniacslk/dhcp/dhcpv4/nclient4"
-	"github.com/sirupsen/logrus"
 )
 
 // GetServerFromDHCP4 returns the first usable bootstrap server as a normalized
 // HTTPS origin, or an empty string when no usable server is discovered.
-func GetServerFromDHCP4(logger *logrus.Logger) (string, error) {
+func GetServerFromDHCP4(logger *slog.Logger) (string, error) {
 
 	// TODO: support for multiple servers?
 
@@ -42,37 +29,38 @@ func GetServerFromDHCP4(logger *logrus.Logger) (string, error) {
 		return "", fmt.Errorf("get network interfaces for bootstrap server discovery via DHCP4: %w", err)
 	}
 	for _, iface := range interfaces {
+		entry := logger.With("protocol", "DHCPv4", "interface", iface.Name)
 		// Skip loopback interfaces
 		if iface.Flags&net.FlagLoopback != 0 {
-			logger.Debug("Skipping loopback device as it cannot be used for discovering the Bootstrap server via DHCP4", iface.Name)
+			entry.Debug("Skipping loopback interface")
 			continue
 		}
 		if iface.Flags&net.FlagRunning == 0 {
-			logger.Debug("Skipping device as it is not running and cannot be used for discovering the Bootstrap server via DHCP4", iface.Name)
+			entry.Debug("Skipping inactive interface")
 			continue
 		}
-		logger.Debug("Trying with device for discovering the Bootstrap server via DHCP4", iface.Name)
+		entry.Debug("Discovering bootstrap server on interface")
 		nc, err := nclient4.New(iface.Name)
 		if err != nil {
-			logger.WithField("interface", iface.Name).WithError(err).Warn("Failed to create DHCPv4 client for discovering the Bootstrap server via DHCP4")
+			entry.Warn("Failed to create DHCP client", "error", err)
 			continue
 		}
 		offer, err := nc.DiscoverOffer(context.Background(), dhcpv4.WithRequestedOptions(dhcpv4.GenericOptionCode(143)))
 		if err != nil {
-			logger.WithField("interface", iface.Name).WithError(err).Warn("Failed to discover the Bootstrap server via DHCP4")
+			entry.Warn("Failed to discover bootstrap server", "error", err)
 			nc.Close()
 			continue
 		}
-		logger.Debug("DHCP4 offer received: ", offer.Summary())
+		entry.Debug("DHCP response received", "response", offer.Summary())
 
 		optionCode := dhcpv4.GenericOptionCode(143)
-		server := serverFromOption(logger, iface.Name, 143, offer.GetOneOption(optionCode), offer.Options.Has(optionCode))
+		server := serverFromOption(logger.With("protocol", "DHCPv4"), iface.Name, 143, offer.GetOneOption(optionCode), offer.Options.Has(optionCode))
 		nc.Close()
 		if server != "" {
 			return server, nil
 		}
 	}
 
-	logger.Warn("No valid Bootstrap server address discovered via DHCP4")
+	logger.Warn("No valid bootstrap server discovered", "protocol", "DHCPv4")
 	return "", nil
 }

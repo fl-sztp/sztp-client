@@ -1,156 +1,108 @@
-/*
-SPDX-License-Identifier: Apache-2.0
-Copyright (C) 2022-2023 Intel Corporation
-Copyright (c) 2022 Dell Inc, or its subsidiaries
-Copyright (C) 2022 Red Hat
-Copyright (C) 2025 Anssi Söderena, Sandip Ghimire
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// SPDX-FileCopyrightText: 2022-2023 Intel Corporation
+// SPDX-FileCopyrightText: 2022 Dell Inc, or its subsidiaries
+// SPDX-FileCopyrightText: 2022 Red Hat
+// SPDX-FileCopyrightText: 2025 Anssi Söderena <https://github.com/asode>
+// SPDX-FileCopyrightText: 2025 Sandip Ghimire <https://github.com/sandip-ghimire>
+// SPDX-FileCopyrightText: 2026 Anssi Söderena <https://github.com/asode> (modifications)
+// SPDX-License-Identifier: Apache-2.0
 
 package sztpclient
 
 import (
 	"encoding/json"
 	"fmt"
-	"os"
+	"log/slog"
+	"strings"
 
 	"github.com/jaypipes/ghw"
 	"gopkg.in/ini.v1"
 )
 
-// DiscoverDeviceInformation discovers the device information and sets the serial number, hardware model, OS name, OS version, and nonce.
-// The serial number is set to the user-provided serial number if it is provided.
-// The hardware model is set to the discovered product name, baseboard product, or chassis version if available.
-// The OS name and version are set to the values in the /etc/os-release file if available.
+// DeviceInformation contains both the physical identity and the identity used
+// for bootstrap authentication. Missing optional fields are empty.
+type DeviceInformation struct {
+	HardwareSerialNumber string
+	HardwareSerialSource string
+	SerialNumber         string
+	SerialSource         string
+	HardwareModel        string
+	OSName               string
+	OSVersion            string
+}
+
+// DiscoverDeviceInformation reads local hardware and OS information without
+// initializing a bootstrap client. A serial override affects authentication
+// only; the physical serial number is still discovered and returned.
+// Partial information is returned even when no usable serial number is found.
+func DiscoverDeviceInformation(logger *slog.Logger, serialOverride string) (DeviceInformation, error) {
+	var info DeviceInformation
+	hardwareLogger := logger.With("component", "ghw")
+	acceptHardware := func(source, serial, model string) {
+		if info.HardwareSerialNumber == "" && usableHardwareValue(serial) {
+			info.HardwareSerialNumber = strings.TrimSpace(serial)
+			info.HardwareSerialSource = source
+		}
+		if info.HardwareModel == "" && usableHardwareValue(model) {
+			info.HardwareModel = strings.TrimSpace(model)
+		}
+	}
+
+	if product, err := ghw.Product(ghw.WithLogger(hardwareLogger)); err != nil {
+		logger.Debug("Error getting device product info", "error", err)
+	} else {
+		acceptHardware("product", product.SerialNumber, product.Name)
+	}
+	if board, err := ghw.Baseboard(ghw.WithLogger(hardwareLogger)); err != nil {
+		logger.Debug("Error getting baseboard info", "error", err)
+	} else {
+		acceptHardware("baseboard", board.SerialNumber, board.Product)
+	}
+	if chassis, err := ghw.Chassis(ghw.WithLogger(hardwareLogger)); err != nil {
+		logger.Debug("Error getting chassis info", "error", err)
+	} else {
+		acceptHardware("chassis", chassis.SerialNumber, chassis.Version)
+	}
+
+	if cfg, err := ini.Load("/etc/os-release"); err != nil {
+		logger.Debug("Error loading os-release file", "error", err)
+	} else {
+		info.OSName = cfg.Section("").Key("NAME").String()
+		info.OSVersion = cfg.Section("").Key("VERSION").String()
+	}
+
+	info.SerialNumber = info.HardwareSerialNumber
+	info.SerialSource = info.HardwareSerialSource
+	if serialOverride != "" {
+		info.SerialNumber = serialOverride
+		info.SerialSource = "override"
+	}
+	if info.SerialNumber == "" {
+		return info, fmt.Errorf("could not determine the device serial number")
+	}
+	logger.Debug("Using device serial number", "source", info.SerialSource, "serial_number", info.SerialNumber)
+	return info, nil
+}
+
+func usableHardwareValue(value string) bool {
+	value = strings.TrimSpace(value)
+	return value != "" && value != "0" && !strings.EqualFold(value, "unknown")
+}
+
 func (a *Client) getDeviceInformation() error {
-	var err error
-	var serialNumber string
-	var osName string
-	var osVersion string
-	var hwModel string
-	var nonce string = "" // TODO
-
-	// Use the user-provided serial number if it is set
-	if a.SerialNumber != "" {
-		a.Logger.Debug("Using user-provided serial number: ", a.SerialNumber)
-		serialNumber = a.SerialNumber
-	}
-
-	// The ghw.Product() function returns a ghw.ProductInfo struct that contains information about the host computer's hardware product line.
-	product, err := ghw.Product()
+	info, err := DiscoverDeviceInformation(a.Logger, a.SerialNumber)
 	if err != nil {
-		a.Logger.Debug("Error getting device product info: ", err)
-	} else {
-		// Use the discovered product serial number if the user did not provide one
-		if serialNumber == "" {
-			if product.SerialNumber != "" && product.SerialNumber != "0" {
-				a.Logger.Debug("Using discovered product serial number: ", product.SerialNumber)
-				serialNumber = product.SerialNumber
-			}
-		}
-		// Use the discovered product name if not already set
-		if hwModel == "" {
-			if product.Name != "" && product.Name != "0" {
-				hwModel = product.Name
-			}
-		}
+		return err
 	}
-
-	// The ghw.Baseboard() function returns a ghw.BaseboardInfo struct that contains information about the host computer's hardware baseboard.
-	baseboard, err := ghw.Baseboard()
-	if err != nil {
-		a.Logger.Debug("Error getting baseboard info: ", err)
-	} else {
-		// Use the discovered baseboard product name if the user did not provide one
-		if serialNumber == "" {
-			if baseboard.SerialNumber != "" && baseboard.SerialNumber != "0" {
-				a.Logger.Debug("Using discovered baseboard serial number: ", baseboard.SerialNumber)
-				serialNumber = baseboard.SerialNumber
-			}
-		}
-		// Use the discovered baseboard product name if not already set
-		if hwModel == "" {
-			if baseboard.Product != "" && baseboard.Product != "0" {
-				a.Logger.Debug("Using discovered baseboard product name: ", baseboard.Product)
-				hwModel = baseboard.Product
-			}
-		}
-	}
-
-	// The ghw.Chassis() function returns a ghw.ChassisInfo struct that contains information about the host computer's hardware chassis.
-	chassis, err := ghw.Chassis()
-	if err != nil {
-		a.Logger.Debug("Error getting chassis info: ", err)
-	} else {
-		// Use the discovered chassis serial number if the user did not provide one
-		if serialNumber == "" {
-			if chassis.SerialNumber != "" && chassis.SerialNumber != "0" {
-				a.Logger.Debug("Using discovered chassis serial number: ", chassis.SerialNumber)
-				serialNumber = chassis.SerialNumber
-			}
-		}
-		// Use the discovered chassis product version if not already set
-		if hwModel == "" {
-			if chassis.Version != "" && chassis.Version != "0" {
-				a.Logger.Debug("Using discovered chassis product version: ", chassis.Version)
-				hwModel = chassis.Version
-			}
-		}
-	}
-
-	// Try to load the os-release file and get the OS name and version
-	var osReleaseFile string
-
-	if _, err := os.Stat("/etc/os-release"); err == nil {
-		osReleaseFile = "/etc/os-release"
-	}
-
-	cfg, err := ini.Load(osReleaseFile)
-	if err != nil {
-		a.Logger.Debug("Error loading os-release file: ", err)
-	} else {
-		// Use the discovered OS name if not set
-		if osName == "" {
-			a.Logger.Debug("Using discovered OS name: ", cfg.Section("").Key("NAME").String())
-			osName = cfg.Section("").Key("NAME").String()
-		}
-		// Use the discovered OS version if not set
-		if osVersion == "" {
-			a.Logger.Debug("Using discovered OS version: ", cfg.Section("").Key("VERSION").String())
-			osVersion = cfg.Section("").Key("VERSION").String()
-		}
-	}
-
-	// If the serial number is still empty, return an error
-	if serialNumber == "" {
-		return fmt.Errorf("could not determine the device serial number")
-	}
-
-	// Set serial number
-	a.SerialNumber = serialNumber
-
-	// Set Device Information
+	a.SerialNumber = info.SerialNumber
 	var input InputJSON
-	input.IetfSztpBootstrapServerInput.HwModel = hwModel
-	input.IetfSztpBootstrapServerInput.OsName = osName
-	input.IetfSztpBootstrapServerInput.OsVersion = osVersion
-	input.IetfSztpBootstrapServerInput.Nonce = nonce // TODO
+	input.IetfSztpBootstrapServerInput.HwModel = info.HardwareModel
+	input.IetfSztpBootstrapServerInput.OsName = info.OSName
+	input.IetfSztpBootstrapServerInput.OsVersion = info.OSVersion
+	// Nonce remains empty until nonce generation is implemented.
 	inputJSON, err := json.Marshal(input)
 	if err != nil {
-		return fmt.Errorf("error marshalling device information: %v", err)
+		return fmt.Errorf("error marshalling device information: %w", err)
 	}
 	a.InputJSONContent = string(inputJSON)
-
 	return nil
 }

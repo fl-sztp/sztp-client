@@ -1,34 +1,22 @@
 //go:build linux
 
-/*
-SPDX-License-Identifier: Apache-2.0
-Copyright (C) 2026 Anssi Söderena
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// SPDX-FileCopyrightText: 2026 Anssi Söderena <https://github.com/asode>
+// SPDX-License-Identifier: Apache-2.0
 
 package main
 
 import (
 	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
 	"time"
+
+	"fl-sztp-client/internal/logging"
 
 	"github.com/insomniacslk/dhcp/dhcpv4"
 	"github.com/insomniacslk/dhcp/dhcpv4/server4"
@@ -37,6 +25,7 @@ import (
 )
 
 func main() {
+	slog.SetDefault(logging.New(os.Stderr, false))
 	var err error
 	if len(os.Args) == 2 && os.Args[1] == "--healthcheck" {
 		err = healthcheck()
@@ -46,7 +35,7 @@ func main() {
 		err = run()
 	}
 	if err != nil {
-		log.Print(err)
+		slog.Error("Fixture failed", "error", err)
 		os.Exit(1)
 	}
 }
@@ -122,7 +111,7 @@ func (*servingLogger4) PrintMessage(string, *dhcpv4.DHCPv4) {}
 func (l *servingLogger4) Printf(format string, args ...interface{}) {
 	if format == "Ready to handle requests" {
 		l.f.setServing(4, true)
-		log.Print("DHCPv4 serving on eth0 UDP 67")
+		slog.Info("DHCP server ready", "protocol", "DHCPv4", "interface", "eth0", "port", 67)
 	}
 }
 
@@ -132,6 +121,6 @@ func (*servingLogger6) PrintMessage(string, *dhcpv6.Message) {}
 func (l *servingLogger6) Printf(format string, args ...interface{}) {
 	if format == "Ready to handle requests" {
 		l.f.setServing(6, true)
-		log.Print("DHCPv6 serving on eth0 UDP 547")
+		slog.Info("DHCP server ready", "protocol", "DHCPv6", "interface", "eth0", "port", 547)
 	}
 }

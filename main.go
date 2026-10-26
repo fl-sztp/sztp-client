@@ -1,20 +1,7 @@
-/*
-SPDX-License-Identifier: Apache-2.0
-Copyright (C) 2025 Anssi Söderena, Sandip Ghimire
-Modifications Copyright (C) 2026 Anssi Söderena
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// SPDX-FileCopyrightText: 2025 Anssi Söderena <https://github.com/asode>
+// SPDX-FileCopyrightText: 2025 Sandip Ghimire <https://github.com/sandip-ghimire>
+// SPDX-FileCopyrightText: 2026 Anssi Söderena <https://github.com/asode> (modifications)
+// SPDX-License-Identifier: Apache-2.0
 
 package main
 
@@ -25,7 +12,8 @@ import (
 	"os"
 	"time"
 
-	"github.com/sirupsen/logrus"
+	"fl-sztp-client/internal/logging"
+	"log/slog"
 )
 
 const (
@@ -33,32 +21,25 @@ const (
 )
 
 func main() {
-
-	var logger = logrus.New()
-	// Set the log output to stdout with timestamp
-	logger.SetFormatter(&logrus.TextFormatter{
-		FullTimestamp: true,
-	})
+	logger := logging.New(os.Stderr, false)
+	slog.SetDefault(logger)
 
 	config, err := getConfig()
 	if err != nil {
-		logger.Fatalf("Failed to initialize configuration: %v", err)
+		logger.Error("Failed to initialize configuration", "error", err)
+		os.Exit(1)
 	}
 
-	// If the --debug flag is provided, enable debug mode
-	if config.UseDebug {
-		logger.SetLevel(logrus.DebugLevel)
-		// logger.SetReportCaller(true)
-		logger.Debug("Debug mode enabled")
-	} else {
-		logger.SetLevel(logrus.InfoLevel)
-	}
+	logger = logging.New(os.Stderr, config.UseDebug)
+	slog.SetDefault(logger)
+	logger.Debug("Debug mode enabled")
 
 	// try to create tmp folder if it doesn't exist
 	if _, err := os.Stat(config.TmpFolder); os.IsNotExist(err) {
 		err = os.Mkdir(config.TmpFolder, 0755)
 		if err != nil {
-			logger.Fatalf("tmp folder %s doesn't exist and failed to create it: %v", config.TmpFolder, err)
+			logger.Error("Failed to create temporary folder", "path", config.TmpFolder, "error", err)
+			os.Exit(1)
 		}
 	}
 
@@ -76,26 +57,26 @@ func main() {
 		if server == "" {
 			server = discoverServerWithRetry(logger, dhcpclient.GetServerFromDHCP6, dhcpclient.GetServerFromDHCP4, 10, time.Minute, time.Sleep)
 			if server == "" {
-				logger.Error("Failed to discover server address via DHCP after 10 attempts")
+				logger.Warn("DHCP discovery exhausted", "attempt", 10)
 				server, err = serveraddr.Normalize(FALLBACK_SERVER)
 				if err != nil {
-					logger.Fatalf("Failed to normalize fallback server address: %v", err)
+					logger.Error("Failed to normalize fallback server address", "error", err)
+					os.Exit(1)
 				}
-				logger.Info("Using fallback server address: ", server)
+				logger.Info("Using fallback server address", "server", server)
 			}
 		}
 
 		// Output the server address
-		logger.Info("Using server address: ", server)
+		logger.Info("Using server address", "event", "bootstrap_server_selected", "server", server)
 
 		// Create a new bootstrap client instance
 		client := sztpclient.NewClient(logger, config.AllowInsecure, server, config.TmpFolder, config.DeviceSerialNumber, config.DevicePassword, config.DevicePrivateKey, config.DeviceEndEntityCert, config.BootstrapTrustAnchor)
 
 		err = client.RunBootstrapSequence()
 		if err != nil {
-			logger.Error("Bootstrap sequence failed: ", err)
+			logger.Warn("Bootstrap failed; retrying", "error", err, "attempt", bootstrapRetryNum+1, "delay", time.Minute)
 			bootstrapRetryNum += 1
-			logger.Warnf("Retrying the bootstrap process in 1 minute... (retry %d/∞)", bootstrapRetryNum)
 			time.Sleep(1 * time.Minute)
 		} else {
 			bootstrapSuccessful = true

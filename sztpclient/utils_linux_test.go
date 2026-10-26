@@ -1,21 +1,7 @@
 //go:build linux
 
-/*
-SPDX-License-Identifier: Apache-2.0
-Copyright (C) 2026 Anssi Söderena
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// SPDX-FileCopyrightText: 2026 Anssi Söderena <https://github.com/asode>
+// SPDX-License-Identifier: Apache-2.0
 
 package sztpclient
 
@@ -28,7 +14,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/sirupsen/logrus"
+	"fl-sztp-client/internal/logging"
 )
 
 func TestDeviceInformationLinux(t *testing.T) {
@@ -85,14 +71,13 @@ func TestDeviceInformationLinux(t *testing.T) {
 		},
 		{
 			name:   "serial override without firmware",
-			serial: "user-serial", wantSerial: "user-serial", wantModel: "unknown",
+			serial: "user-serial", wantSerial: "user-serial", wantModel: "",
 		},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			root := t.TempDir()
 			t.Setenv("GHW_CHROOT", root)
 			t.Setenv("GHW_DISABLE_TOOLS", "1")
-			t.Setenv("GHW_DISABLE_WARNINGS", "1")
 			for name, content := range tt.files {
 				path := filepath.Join(root, name)
 				if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
@@ -102,8 +87,7 @@ func TestDeviceInformationLinux(t *testing.T) {
 					t.Fatal(err)
 				}
 			}
-			logger := logrus.New()
-			logger.SetOutput(io.Discard)
+			logger := logging.New(io.Discard, false)
 			client := &Client{Logger: logger, SerialNumber: tt.serial}
 			if err := client.getDeviceInformation(); err != nil {
 				t.Fatal(err)

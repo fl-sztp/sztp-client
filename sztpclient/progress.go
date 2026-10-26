@@ -1,27 +1,17 @@
-/*
-SPDX-License-Identifier: Apache-2.0
-Copyright (C) 2022-2023 Intel Corporation
-Copyright (c) 2022 Dell Inc, or its subsidiaries.
-Copyright (C) 2022 Red Hat.
-Copyright (C) 2025 Anssi Söderena, Sandip Ghimire
+// SPDX-FileCopyrightText: 2022-2023 Intel Corporation
+// SPDX-FileCopyrightText: 2022 Dell Inc, or its subsidiaries.
+// SPDX-FileCopyrightText: 2022 Red Hat.
+// SPDX-FileCopyrightText: 2025 Anssi Söderena <https://github.com/asode>
+// SPDX-FileCopyrightText: 2025 Sandip Ghimire <https://github.com/sandip-ghimire>
+// SPDX-License-Identifier: Apache-2.0
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// Modified for sztp-client.
 
 package sztpclient
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 )
 
@@ -135,7 +125,7 @@ type ProgressJSON struct {
 }
 
 func (a *Client) postProgress(s ProgressType, message string) {
-	a.Logger.Debugf("Starting the Report Progress request for type: %s, message: %s", s, message)
+	a.Logger.Debug(fmt.Sprintf("Starting the Report Progress request for type: %s, message: %s", s, message))
 	url := a.BootstrapServerURL + a.BootstrapServerRestconfLink.Href + "/operations/ietf-sztp-bootstrap-server:report-progress"
 	var p ProgressJSON
 	p.IetfSztpBootstrapServerInput.ProgressType = s.String()
@@ -143,16 +133,16 @@ func (a *Client) postProgress(s ProgressType, message string) {
 
 	progressJSON, err := json.Marshal(p)
 	if err != nil {
-		a.Logger.Errorf("Error marshalling the progress JSON: %s", err.Error())
+		a.Logger.Error(fmt.Sprintf("Error marshalling the progress JSON: %s", err.Error()))
 		return
 	}
 
 	res, err := a.postRequest(string(progressJSON), url, true, http.StatusNoContent)
 	if err != nil {
-		a.Logger.Errorf("Error doing the report for %s: %s", message, err.Error())
+		a.Logger.Error(fmt.Sprintf("Error doing the report for %s: %s", message, err.Error()))
 		return
 	}
 
-	a.Logger.Debug("Response from the server: ", res)
-	a.Logger.Debugf("Report Progress request completed successfully for %s", message)
+	a.Logger.Debug("Response from the server: ", "response", res)
+	a.Logger.Debug(fmt.Sprintf("Report Progress request completed successfully for %s", message))
 }

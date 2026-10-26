@@ -1,38 +1,38 @@
-/*
-SPDX-License-Identifier: Apache-2.0
-Copyright (C) 2026 Anssi Söderena
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+// SPDX-FileCopyrightText: 2026 Anssi Söderena <https://github.com/asode>
+// SPDX-License-Identifier: Apache-2.0
 
 package dhcpclient
 
 import (
-	"io"
+	"bytes"
+	"encoding/json"
+	"log/slog"
 	"strings"
 	"testing"
-
-	"github.com/sirupsen/logrus"
 )
 
-type optionLogHook struct {
-	entries []*logrus.Entry
+type optionLog struct {
+	Level     string `json:"level"`
+	Message   string `json:"msg"`
+	Interface string `json:"interface"`
+	Option    int    `json:"option"`
+	Error     string `json:"error"`
+	Server    string `json:"server"`
 }
 
-func (h *optionLogHook) Levels() []logrus.Level { return logrus.AllLevels }
-func (h *optionLogHook) Fire(entry *logrus.Entry) error {
-	h.entries = append(h.entries, entry)
-	return nil
+func newOptionLogger() (*slog.Logger, *bytes.Buffer) {
+	output := new(bytes.Buffer)
+	return slog.New(slog.NewJSONHandler(output, nil)), output
+}
+
+func readOptionLog(t *testing.T, output *bytes.Buffer) optionLog {
+	t.Helper()
+	var entry optionLog
+	// Unmarshal rejects missing records and more than one JSON record.
+	if err := json.Unmarshal(output.Bytes(), &entry); err != nil {
+		t.Fatalf("expected one JSON log record: %v; output=%s", err, output)
+	}
+	return entry
 }
 
 func TestServerFromOption(t *testing.T) {
@@ -55,33 +55,27 @@ func TestServerFromOption(t *testing.T) {
 	for _, code := range []int{143, 136} {
 		for _, tt := range tests {
 			t.Run(fmtOptionName(code, tt.name), func(t *testing.T) {
-				logger := logrus.New()
-				logger.SetOutput(io.Discard)
-				hook := &optionLogHook{}
-				logger.AddHook(hook)
+				logger, output := newOptionLogger()
 				if got := serverFromOption(logger, "eth-test", code, []byte(tt.data), tt.present); got != tt.want {
 					t.Fatalf("serverFromOption() = %q, want %q", got, tt.want)
 				}
-				if len(hook.entries) != 1 {
-					t.Fatalf("got %d log entries, want 1", len(hook.entries))
-				}
-				entry := hook.entries[0]
-				if entry.Data["interface"] != "eth-test" || entry.Data["option"] != code {
-					t.Errorf("missing interface/option fields: %v", entry.Data)
+				entry := readOptionLog(t, output)
+				if entry.Interface != "eth-test" || entry.Option != code {
+					t.Errorf("missing interface/option fields: %v", entry)
 				}
 				missing := strings.Contains(entry.Message, "not found")
 				if missing == tt.present {
 					t.Errorf("missing warning = %v for present = %v: %s", missing, tt.present, entry.Message)
 				}
 				if tt.want != "" {
-					if entry.Level != logrus.InfoLevel || !strings.Contains(entry.Message, tt.want) {
+					if entry.Level != "INFO" || entry.Server != tt.want {
 						t.Errorf("success log must contain canonical origin: %v", entry)
 					}
-				} else if entry.Level != logrus.WarnLevel {
+				} else if entry.Level != "WARN" {
 					t.Errorf("invalid or missing option log level = %v, want warn", entry.Level)
 				}
-				if tt.present && tt.want == "" && entry.Data["error"] == nil {
-					t.Errorf("invalid present option log lacks normalization error: %v", entry.Data)
+				if tt.present && tt.want == "" && entry.Error == "" {
+					t.Errorf("invalid present option log lacks normalization error: %v", entry)
 				}
 			})
 		}
