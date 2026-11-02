@@ -1,5 +1,9 @@
 # SZTP Client
 
+This project is evolving rapidly and may introduce breaking changes at this stage. We plan to introduce versioned releases in the near future.
+
+The latest changes are available in the [development branch](https://github.com/fl-sztp/sztp-client/tree/development) before they are merged into `main`.
+
 Go implementation of a Secure Zero Touch Provisioning client, designed to automate the secure onboarding and provisioning of devices such as computers, DPUs, and network equipment. It communicates with an SZTP bootstrap server using mutual TLS authentication and supports secure device identity verification and configuration delivery.
 
 Our future goal is to align with the [RFC 8572](https://datatracker.ietf.org/doc/html/rfc8572) specifications for SZTP.
