@@ -13,3 +13,20 @@ __debug*
 /sztp-client
 /fl-sztp-client
 /sztp-client-linux-*
+
+# Local AI coding tools and skills
+/.agents/
+/.claude/
+/.codex/
+/.copilot/
+/.gemini/
+/.opencode/
+/.cursor/
+/.continue/
+/.kiro/
+/.amazonq/
+/.crush/
+/.superpowers/
+/.aider*
+/.github/skills/
+/.github/agents/
