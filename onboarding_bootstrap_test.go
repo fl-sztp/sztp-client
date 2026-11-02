@@ -34,7 +34,7 @@ import (
 )
 
 func TestBootstrapRetryLogsFailureOnce(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}))
 	defer server.Close()
@@ -45,6 +45,7 @@ func TestBootstrapRetryLogsFailureOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 	config := &Config{Server: server.URL, TmpFolder: workspace, DeviceSerialNumber: "override"}
+	config.BootstrapTrustAnchor = writeCertificateFixture(t, t.TempDir(), "server-ca.pem", pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw}))
 	stop := errors.New("stop after the first attempt")
 	_, err = runBootstrapWithRetry(context.Background(), logger, config, func(_ context.Context, delay time.Duration) error {
 		if delay != time.Minute {

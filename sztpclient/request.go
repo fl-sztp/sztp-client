@@ -106,6 +106,23 @@ func readResponseBody(body io.Reader, maxBytes int64) ([]byte, error) {
 	return data, nil
 }
 
+// requireHTTPS enforces the RESTCONF transport requirement (RFC 8040, 2.1)
+// and authenticated host metadata retrieval (RFC 6415, 5).
+func requireHTTPS(req *http.Request) error {
+	if req.URL.Scheme != "https" {
+		return errors.New("HTTPS is required for SZTP requests")
+	}
+	return nil
+}
+
+func checkRedirect(req *http.Request, via []*http.Request) error {
+	// A custom redirect policy replaces Go's default request limit.
+	if len(via) >= 10 {
+		return errors.New("stopped after 10 redirects")
+	}
+	return requireHTTPS(req)
+}
+
 func (a *Client) getHostMeta(ctx context.Context) (XRD, error) {
 	if err := a.RequestLimits.Validate(); err != nil {
 		return XRD{}, err
@@ -119,6 +136,9 @@ func (a *Client) getHostMeta(ctx context.Context) (XRD, error) {
 	if err != nil {
 		return XRD{}, err
 	}
+	if err := requireHTTPS(r); err != nil {
+		return XRD{}, err
+	}
 
 	r.Header.Add("Accept", "application/xrd+xml")
 	// r.SetBasicAuth(a.SerialNumber, a.DevicePassword)
@@ -129,6 +149,7 @@ func (a *Client) getHostMeta(ctx context.Context) (XRD, error) {
 	cert, _ := tls.LoadX509KeyPair(a.DeviceEndEntityCert, a.DevicePrivateKey)
 
 	client := &http.Client{
+		CheckRedirect: checkRedirect,
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{
 				RootCAs:            caCertPool,
@@ -164,10 +185,6 @@ func (a *Client) getHostMeta(ctx context.Context) (XRD, error) {
 	return xrd, nil
 }
 
-func (a *Client) postRequest(input string, url string, empty bool, expectedStatusCode int) (*BootstrapServerPostOutput, error) {
-	return a.postRequestWithContext(context.Background(), input, url, empty, expectedStatusCode)
-}
-
 func (a *Client) postRequestWithContext(ctx context.Context, input string, url string, empty bool, expectedStatusCode int) (*BootstrapServerPostOutput, error) {
 	if err := a.RequestLimits.Validate(); err != nil {
 		return nil, err
@@ -189,6 +206,9 @@ func (a *Client) postRequestWithContext(ctx context.Context, input string, url s
 	if err != nil {
 		return nil, err
 	}
+	if err := requireHTTPS(r); err != nil {
+		return nil, err
+	}
 
 	r.SetBasicAuth(a.SerialNumber, a.DevicePassword)
 	r.Header.Add("Content-Type", a.ContentTypeReq)
@@ -200,6 +220,7 @@ func (a *Client) postRequestWithContext(ctx context.Context, input string, url s
 	cert, _ := tls.LoadX509KeyPair(a.DeviceEndEntityCert, a.DevicePrivateKey)
 
 	client := &http.Client{
+		CheckRedirect: checkRedirect,
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{
 				RootCAs:            caCertPool,

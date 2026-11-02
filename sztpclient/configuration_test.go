@@ -9,9 +9,11 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/x509"
 	"encoding/asn1"
 	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"fmt"
 	"io"
@@ -22,6 +24,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -144,7 +147,7 @@ func TestHTTPRequestLimitsDeadlines(t *testing.T) {
 					}
 					defer cancel()
 					release := make(chan struct{})
-					server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 						_, _ = io.Copy(io.Discard, r.Body)
 						if started {
 							_, _ = io.WriteString(w, "partial")
@@ -160,6 +163,7 @@ func TestHTTPRequestLimitsDeadlines(t *testing.T) {
 					}))
 					defer func() { close(release); server.Close() }()
 					client := NewClient(slog.New(slog.NewTextHandler(io.Discard, nil)), false, server.URL, "", "", "", "", "", "")
+					client.BootstrapTrustAnchorCert = trustHTTPTestServer(t, server)
 					timeout := 200 * time.Millisecond
 					if parent != "background" {
 						timeout = 10 * time.Second
@@ -191,7 +195,7 @@ func TestHTTPResponseSizeLimits(t *testing.T) {
 			for _, size := range []int{limit - 1, limit, limit + 1} {
 				t.Run(fmt.Sprintf("%s/%s/%d", request.name, encoding, size), func(t *testing.T) {
 					body := request.body + strings.Repeat(" ", size-len(request.body))
-					server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 						switch encoding {
 						case "length":
 							w.Header().Set("Content-Length", fmt.Sprint(len(body)))
@@ -208,6 +212,7 @@ func TestHTTPResponseSizeLimits(t *testing.T) {
 					}))
 					defer server.Close()
 					client := NewClient(slog.New(slog.NewTextHandler(io.Discard, nil)), false, server.URL, "", "", "", "", "", "")
+					client.BootstrapTrustAnchorCert = trustHTTPTestServer(t, server)
 					// Only the selected profile is restrictive: this catches using
 					// the bootstrap cap for host metadata or progress responses.
 					switch request.name {
@@ -272,7 +277,7 @@ func TestBootstrapPreservesHTTPErrors(t *testing.T) {
 		for _, failure := range []string{"timeout", "oversize"} {
 			t.Run(path+"/"+failure, func(t *testing.T) {
 				release := make(chan struct{})
-				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 					_, _ = io.Copy(io.Discard, r.Body)
 					if r.URL.Path == path {
 						if failure == "timeout" {
@@ -293,6 +298,7 @@ func TestBootstrapPreservesHTTPErrors(t *testing.T) {
 				}))
 				defer func() { close(release); server.Close() }()
 				client := NewClient(slog.New(slog.NewTextHandler(io.Discard, nil)), false, server.URL, t.TempDir(), "test-device", "", "", "", "")
+				client.BootstrapTrustAnchorCert = trustHTTPTestServer(t, server)
 				client.RequestLimits = HTTPRequestLimits{HostMetaTimeout: 200 * time.Millisecond, BootstrapTimeout: 200 * time.Millisecond, HostMetaMaxResponseBytes: 512, BootstrapMaxResponseBytes: 512}
 				_, err := client.RunBootstrapSequence(context.Background())
 				want := error(context.DeadlineExceeded)
@@ -315,47 +321,10 @@ func onboardingTestFields(config, pre, post string) map[string]string {
 	}
 }
 
-func TestProgressRequestDeadline(t *testing.T) {
-	for _, responseStarted := range []bool{false, true} {
-		name := "before headers"
-		if responseStarted {
-			name = "during response body"
-		}
-		t.Run(name, func(t *testing.T) {
-			release := make(chan struct{})
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				_, _ = io.Copy(io.Discard, r.Body)
-				if responseStarted {
-					w.WriteHeader(http.StatusOK)
-					_, _ = w.Write([]byte("partial response"))
-					w.(http.Flusher).Flush()
-				}
-				select {
-				case <-r.Context().Done():
-				case <-release:
-				}
-			}))
-			defer func() { close(release); server.Close() }()
-			logger := logging.New(io.Discard, false)
-			client := NewClient(logger, false, server.URL, t.TempDir(), "test-device", "", "", "", "")
-			ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
-			defer cancel()
-			started := time.Now()
-			_, err := client.postRequestWithContext(ctx, "{}", server.URL, true, http.StatusNoContent)
-			if !errors.Is(err, context.DeadlineExceeded) {
-				t.Fatalf("request error=%v, want deadline exceeded", err)
-			}
-			if elapsed := time.Since(started); elapsed > 2*time.Second {
-				t.Fatalf("request exceeded its deadline: %s", elapsed)
-			}
-		})
-	}
-}
-
 func TestRequestErrorsAreReturnedWithoutDuplicateLogs(t *testing.T) {
 	for _, kind := range []string{"transport", "body", "decode"} {
 		t.Run(kind, func(t *testing.T) {
-			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				switch kind {
 				case "transport":
 					conn, _, err := w.(http.Hijacker).Hijack()
@@ -375,7 +344,8 @@ func TestRequestErrorsAreReturnedWithoutDuplicateLogs(t *testing.T) {
 			var logs bytes.Buffer
 			logger := slog.New(slog.NewJSONHandler(&logs, &slog.HandlerOptions{Level: slog.LevelWarn}))
 			client := NewClient(logger, false, server.URL, "", "test-device", "", "", "", "")
-			_, err := client.postRequest("{}", server.URL, false, http.StatusOK)
+			client.BootstrapTrustAnchorCert = trustHTTPTestServer(t, server)
+			_, err := client.postRequestWithContext(context.Background(), "{}", server.URL, false, http.StatusOK)
 			if err == nil {
 				t.Fatal("request unexpectedly succeeded")
 			}
@@ -393,12 +363,13 @@ func TestRequestErrorsAreReturnedWithoutDuplicateLogs(t *testing.T) {
 }
 
 func TestBestEffortProgressFailureLogsOnce(t *testing.T) {
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusServiceUnavailable)
 	}))
 	defer server.Close()
 	var logs bytes.Buffer
 	client := NewClient(slog.New(slog.NewJSONHandler(&logs, nil)), false, server.URL, "", "test-device", "", "", "", "")
+	client.BootstrapTrustAnchorCert = trustHTTPTestServer(t, server)
 	client.postProgress(context.Background(), ProgressTypePreScriptInitiated, "Report starting")
 	var event map[string]any
 	if err := json.Unmarshal(logs.Bytes(), &event); err != nil {
@@ -760,5 +731,175 @@ func TestBootstrapOnboardingEmptyArtifacts(t *testing.T) {
 	}
 	for _, entry := range entries {
 		onboardingTestRead(t, filepath.Join(dirs[0], entry.Name()), "")
+	}
+}
+
+func trustHTTPTestServer(t *testing.T, server *httptest.Server) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "ca.pem")
+	data := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: server.Certificate().Raw})
+	if err := os.WriteFile(path, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	return path
+}
+
+func httpsTestClient(t *testing.T, server *httptest.Server, insecure bool) *Client {
+	t.Helper()
+	ca := trustHTTPTestServer(t, server)
+	key, err := x509.MarshalPKCS8PrivateKey(server.TLS.Certificates[0].PrivateKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyPath := filepath.Join(t.TempDir(), "device-key.pem")
+	if err := os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: key}), 0600); err != nil {
+		t.Fatal(err)
+	}
+	return NewClient(slog.New(slog.NewTextHandler(io.Discard, nil)), insecure, server.URL, "", "test-device", "test-password", keyPath, ca, ca)
+}
+
+func httpsRequestCases() []httpLimitCase {
+	return append(httpLimitCases(), httpLimitCase{"completion", "", func(c *Client, ctx context.Context) error {
+		return c.ReportCompletion(ctx, CompletionReport{Endpoint: c.BootstrapServerURL + "/report", SerialNumber: "test-device"})
+	}})
+}
+
+func writeHTTPTestResponse(w http.ResponseWriter, request httpLimitCase) {
+	if request.name == "completion" {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	_, _ = io.WriteString(w, request.body)
+}
+
+func TestHTTPSRequiredBeforeSending(t *testing.T) {
+	for _, request := range httpsRequestCases() {
+		for _, insecure := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/insecure=%t", request.name, insecure), func(t *testing.T) {
+				var hits atomic.Int32
+				sink := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					hits.Add(1)
+					writeHTTPTestResponse(w, request)
+				}))
+				defer sink.Close()
+				origin := httptest.NewTLSServer(http.NotFoundHandler())
+				defer origin.Close()
+				client := httpsTestClient(t, origin, insecure)
+				client.BootstrapServerURL = sink.URL
+				err := request.request(client, context.Background())
+				if err == nil || !strings.Contains(err.Error(), "HTTPS") || hits.Load() != 0 {
+					t.Fatalf("error=%v HTTP requests=%d, want HTTPS rejection before sending", err, hits.Load())
+				}
+			})
+		}
+	}
+}
+
+func TestHTTPRedirectRejectsDowngrade(t *testing.T) {
+	for _, request := range httpsRequestCases() {
+		for _, code := range []int{301, 302, 303, 307, 308} {
+			for _, insecure := range []bool{false, true} {
+				for _, chained := range []bool{false, true} {
+					t.Run(fmt.Sprintf("%s/%d/insecure=%t/chained=%t", request.name, code, insecure, chained), func(t *testing.T) {
+						var hits, tlsHits atomic.Int32
+						sink := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+							hits.Add(1)
+							writeHTTPTestResponse(w, request)
+						}))
+						defer sink.Close()
+						origin := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+							tlsHits.Add(1)
+							if chained && r.URL.Path != "/next" {
+								http.Redirect(w, r, "/next", http.StatusTemporaryRedirect)
+								return
+							}
+							http.Redirect(w, r, sink.URL, code)
+						}))
+						defer origin.Close()
+						client := httpsTestClient(t, origin, insecure)
+						err := request.request(client, context.Background())
+						wantHits := int32(1)
+						if chained {
+							wantHits = 2
+						}
+						if err == nil || !strings.Contains(err.Error(), "HTTPS") || hits.Load() != 0 || tlsHits.Load() != wantHits {
+							t.Fatalf("error=%v HTTP requests=%d HTTPS requests=%d, want blocked downgrade", err, hits.Load(), tlsHits.Load())
+						}
+					})
+				}
+			}
+		}
+	}
+}
+
+func TestHTTPRedirectPreservesHTTPS(t *testing.T) {
+	for _, request := range httpsRequestCases() {
+		for _, code := range []int{307, 308} {
+			for _, relative := range []bool{false, true} {
+				t.Run(fmt.Sprintf("%s/%d/relative=%t", request.name, code, relative), func(t *testing.T) {
+					var hits atomic.Int32
+					var method, auth, body string
+					origin := httptest.NewUnstartedServer(nil)
+					origin.Config.Handler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+						data, err := io.ReadAll(r.Body)
+						if err != nil {
+							t.Error(err)
+						}
+						hits.Add(1)
+						if r.URL.Path != "/next" {
+							method, auth, body = r.Method, r.Header.Get("Authorization"), string(data)
+							location := "/next"
+							if !relative {
+								location = origin.URL + location
+							}
+							http.Redirect(w, r, location, code)
+							return
+						}
+						if r.Method != method || r.Header.Get("Authorization") != auth || string(data) != body {
+							t.Error("HTTPS redirect changed method, authentication or body")
+						}
+						if request.name != "host-meta" {
+							user, password, ok := r.BasicAuth()
+							if !ok || user != "test-device" || password != "test-password" || r.Method != http.MethodPost || len(data) == 0 {
+								t.Error("missing POST credentials or body")
+							}
+						}
+						writeHTTPTestResponse(w, request)
+					})
+					origin.StartTLS()
+					defer origin.Close()
+					client := httpsTestClient(t, origin, false)
+					if err := request.request(client, context.Background()); err != nil {
+						t.Fatal(err)
+					}
+					if hits.Load() != 2 {
+						t.Fatalf("requests=%d, want 2", hits.Load())
+					}
+				})
+			}
+		}
+	}
+}
+
+func TestHTTPRedirectLimit(t *testing.T) {
+	for _, request := range httpsRequestCases() {
+		for _, redirects := range []int32{9, 10} {
+			t.Run(fmt.Sprintf("%s/%d", request.name, redirects), func(t *testing.T) {
+				var hits atomic.Int32
+				origin := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					if hits.Add(1) <= redirects {
+						http.Redirect(w, r, "/next", http.StatusTemporaryRedirect)
+						return
+					}
+					writeHTTPTestResponse(w, request)
+				}))
+				defer origin.Close()
+				client := httpsTestClient(t, origin, false)
+				err := request.request(client, context.Background())
+				if (redirects == 9 && err != nil) || (redirects == 10 && (err == nil || !strings.Contains(err.Error(), "stopped after 10 redirects"))) || hits.Load() != 10 {
+					t.Fatalf("error=%v requests=%d, want ten requests with redirect limit enforced", err, hits.Load())
+				}
+			})
+		}
 	}
 }

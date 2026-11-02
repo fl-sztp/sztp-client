@@ -78,6 +78,10 @@ Pending reports resume with current settings; changes never repeat completed pro
 
 Accepts hostnames, `host:port`, HTTP/HTTPS URLs and bracketed IPv6 such as `[2001:db8::1]:9090`. HTTPS is always used, with the supplied port or 443. Userinfo/path/query/fragment are removed: `http://bootstrap:8080/restconf` becomes `https://bootstrap:8080`.
 
+Host metadata, bootstrap data, progress and completion reports require HTTPS for the initial request and every HTTP redirect. Redirects to HTTP are rejected before sending a request to the target, including with `insecure: true`. That setting only skips server certificate verification. HTTPS redirects remain supported, with at most nine redirects per exchange. These transport rules follow [RFC 8040 Section 2.1](https://www.rfc-editor.org/rfc/rfc8040.html#section-2.1) and [RFC 6415 Section 5](https://www.rfc-editor.org/rfc/rfc6415.html#section-5).
+
+Library callers must supply HTTPS URLs. Unlike configuration input, direct HTTP URLs passed to `sztpclient.Client` are rejected when making a request rather than upgraded to HTTPS.
+
 Validation is local; DNS occurs on connection. Unicode becomes IDNA ASCII: `bücher.example` becomes `xn--bcher-kva.example`. See [validation rules](development.md#address-validation). Invalid addresses stop new provisioning/diagnostics; saved completion and reset need none.
 
 ### Find the server through DHCP
