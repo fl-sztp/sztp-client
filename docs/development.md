@@ -168,7 +168,7 @@ Source packages need project/dependency sources and build instructions. RPM `Bui
 - Install the man page when [implemented](PLAN.md#command-line-manual-page): RPM path `%{_mandir}/man1/`, mode `0644`, file entry `%{_mandir}/man1/sztp-client.1*`.
 - Match the [service's](../packaging/systemd/sztp-client.service) `ExecStart` to the installed binary: the example uses `/usr/local/bin/sztp-client`, the Fedora review spec `/usr/bin/sztp-client`.
 
-The service runs as root with persistent state. Include the [deployment guide](deployment.md#install-a-systemd-service) as package documentation for credentials, startup and logs.
+The service runs as root and reads the state path from its YAML configuration. The client creates the persistent state directory when needed. Include the [deployment guide](deployment.md#install-a-systemd-service) as package documentation for credentials, startup and logs.
 
 ### Licenses and notices
 

@@ -10,9 +10,7 @@ RequiresMountsFor=/var/lib/sztp-client
 [Service]
 Type=exec
 User=root
-StateDirectory=sztp-client
-StateDirectoryMode=0700
-ExecStart=/usr/local/bin/sztp-client --config=/etc/sztp-client/config.yaml --state-dir=${STATE_DIRECTORY}
+ExecStart=/usr/local/bin/sztp-client --config=/etc/sztp-client/config.yaml
 TimeoutStartSec=0
 Restart=on-failure
 RestartSec=60s

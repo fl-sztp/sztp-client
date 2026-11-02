@@ -15,7 +15,7 @@ See [quick start](../README.md#quick-start) for first runs and [deployment](depl
 
 ## Configure the client
 
-Copy [config.yaml.example](../config.yaml.example) to `config.yaml` and replace its values. Default: `./config.yaml`; select another with `--config PATH`, or disable loading with `--config ""`.
+Copy [config.yaml.example](../config.yaml.example) to `config.yaml` and replace its values. Without `--config`, the client uses `/etc/sztp-client/config.yaml` if present, otherwise `./config.yaml`. Select only one file with `--config PATH`, or disable all file loading with `--config ""`. Files are not merged. An unreadable, malformed or invalid selected file stops startup without falling back.
 
 Each setting has a matching flag. Requirements apply to normal provisioning:
 
@@ -34,7 +34,7 @@ Each setting has a matching flag. Requirements apply to normal provisioning:
 
 Nonempty string flags override YAML; empty strings normally preserve it. `--debug`/`--insecure` enable settings but cannot disable YAML `true`. Exceptions: [state-dir](deployment.md#manage-the-state-directory) and [HTTP limits](#bound-http-requests).
 
-Explicit config files must exist and contain valid YAML. The default file may be absent for diagnostics, reset and acknowledged/version 1 completion. [Pending reports](deployment.md#understand-completion-reporting) need credentials.
+Explicit config files must exist and contain valid YAML. Both default files may be absent for diagnostics, reset and acknowledged/version 1 completion. [Pending reports](deployment.md#understand-completion-reporting) need credentials.
 
 Replace placeholders:
 

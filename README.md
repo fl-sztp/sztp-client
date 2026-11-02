@@ -40,6 +40,8 @@ This creates the `sztp-client` binary in the repository directory.
 cp config.yaml.example config.yaml
 ```
 
+The client automatically prefers `/etc/sztp-client/config.yaml` over `./config.yaml`. The explicit `--config ./config.yaml` used below selects the local file.
+
 Edit `config.yaml` before running the client. Set your bootstrap server, device serial number and password. Place your device credentials in `certs/`, or change the three certificate and key paths to their actual locations. The example values are placeholders for your device.
 
 Use an explicit `server` address for this first run. An empty `server` enables DHCP discovery, which normally needs root privileges. See the [configuration reference](docs/usage.md#configure-the-client) for all settings.
@@ -52,7 +54,7 @@ This command starts provisioning and runs the scripts supplied by the server:
 ./sztp-client --config ./config.yaml --state-dir="$HOME/.local/state/sztp-client"
 ```
 
-The state directory must be an absolute path. This example uses a persistent location writable by the current user. The default `/var/lib/sztp-client` normally requires administrator setup. The systemd service creates it automatically. Provisioning scripts may also need additional privileges.
+The state directory must be an absolute path. This example uses a persistent location writable by the current user. The default `/var/lib/sztp-client` normally requires administrator setup. The client creates it when the systemd service starts. Provisioning scripts may also need additional privileges.
 
 Progress and script output appear on stderr. The client exits successfully after local provisioning completes and the server acknowledges the final report. Run `./sztp-client --help` to list command-line options.
 

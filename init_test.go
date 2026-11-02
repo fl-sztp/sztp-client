@@ -104,7 +104,7 @@ func TestHTTPRequestLimitsConfig(t *testing.T) {
 // Bootstrap validation now happens after the persistent-state check. Existing
 // configuration tests exercise that validation without filesystem state.
 func getConfigForBootstrapTest() (*Config, error) {
-	config, err := getConfig()
+	config, err := getConfigWithPaths([]string{"./config.yaml"})
 	if err == nil && !config.DiscoverOnly && !config.ResetOnboarding {
 		err = validateBootstrapConfig(config)
 	}

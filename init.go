@@ -35,6 +35,7 @@ type Config struct {
 	ResetOnboarding           bool              `yaml:"-"`
 	StateDir                  string            `yaml:"state-dir"`
 	configLoadErr             error
+	configPath                string
 	ServerSource              string                       `yaml:"-"`
 	SerialSource              string                       `yaml:"-"`
 	Server                    string                       `yaml:"server"`
@@ -120,6 +121,10 @@ func getConfigFromFile(filepath string) (*Config, error) {
 
 // getConfig initializes the configuration by combining defaults, file contents, and flags.
 func getConfig() (*Config, error) {
+	return getConfigWithPaths([]string{"/etc/sztp-client/config.yaml", "./config.yaml"})
+}
+
+func getConfigWithPaths(defaultPaths []string) (*Config, error) {
 	// Define command line flags
 	serverFlag := flag.String("server", "", "Specify the server address")
 	allowInsecureFlag := flag.Bool("insecure", false, "Allow insecure connections (skip SSL certificate verification)")
@@ -136,7 +141,7 @@ func getConfig() (*Config, error) {
 	devicePrivateKey := flag.String("private-key", "", "Specify the device private key")
 	deviceEndEntityCert := flag.String("end-entity-cert", "", "Specify the device end-entity certificate")
 	bootstrapTrustAnchorCert := flag.String("trust-anchor-cert", "", "Specify the bootstrap trust-anchor certificate")
-	configFile := flag.String("config", "./config.yaml", "Path to configuration file (YAML)")
+	configFile := flag.String("config", "", "YAML configuration file (default: /etc/sztp-client/config.yaml, then ./config.yaml). An explicit empty value disables loading")
 	defaultLimits := Config{RequestLimits: sztpclient.DefaultHTTPRequestLimits()}
 	httpFlags := make(map[string]*string)
 	for _, option := range httpLimitOptions(&defaultLimits) {
@@ -192,26 +197,36 @@ func getConfig() (*Config, error) {
 
 	// Load configuration from file if provided
 	var config Config
-	if *configFile != "" {
-		fileConfig, err := getConfigFromFile(*configFile)
+	paths := defaultPaths
+	if configExplicit {
+		paths = nil
+		if *configFile != "" {
+			paths = []string{*configFile}
+		}
+	}
+	for _, path := range paths {
+		fileConfig, err := getConfigFromFile(path)
 		if err != nil {
-			loadErr := fmt.Errorf("error loading config file: %w", err)
+			loadErr := fmt.Errorf("error loading config file %q: %w", path, err)
 			if configExplicit || !os.IsNotExist(err) {
 				return nil, loadErr
 			}
 			// A missing implicit config is harmless for reset, diagnostics, or
 			// an already onboarded device. Bootstrap still requires it.
 			config.configLoadErr = loadErr
+			continue
 		}
 		if fileConfig != nil {
 			config = *fileConfig
+			config.configPath = path
 			if config.Server != "" {
-				config.ServerSource = "config: " + *configFile
+				config.ServerSource = "config: " + path
 			}
 			if config.DeviceSerialNumber != "" {
-				config.SerialSource = "config: " + *configFile
+				config.SerialSource = "config: " + path
 			}
 		}
+		break
 	}
 	config.DiscoverOnly = discoveryMode != ""
 	config.DiscoveryProtocol = protocol

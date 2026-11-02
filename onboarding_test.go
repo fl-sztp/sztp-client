@@ -200,7 +200,9 @@ func TestOnboardingCLIHelper(t *testing.T) {
 	}
 	flag.CommandLine = flag.NewFlagSet("sztp-client", flag.ExitOnError)
 	os.Args = append([]string{"sztp-client"}, args...)
-	main()
+	runClient(func() (*Config, error) {
+		return getConfigWithPaths([]string{filepath.Join(os.Getenv("SZTP_TEST_CONFIG_ROOT"), "system.yaml"), "./config.yaml"})
+	})
 }
 
 func onboardingCLI(t *testing.T, workingDir string, args ...string) (string, error) {
@@ -214,6 +216,53 @@ func onboardingCLI(t *testing.T, workingDir string, args ...string) (string, err
 	cmd.Dir = workingDir
 	out, err := cmd.CombinedOutput()
 	return string(out), err
+}
+
+func TestOnboardingCLIAutoConfigReset(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("SZTP_TEST_CONFIG_ROOT", root)
+	state := filepath.Join(root, "installed-state")
+	other := filepath.Join(root, "local-state")
+	for _, dir := range []string{state, other} {
+		store, err := openOnboardingStore(dir)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := store.Save(legacyState("serial")); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.Close(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for name, dir := range map[string]string{"system.yaml": state, "config.yaml": other} {
+		data, err := json.Marshal(map[string]string{"state-dir": dir})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(root, name), data, 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	marker := filepath.Join(state, "unrelated.txt")
+	if err := os.WriteFile(marker, []byte("keep"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{nil, {"--reset-onboarding"}} {
+		out, err := onboardingCLI(t, root, args...)
+		if err != nil || !strings.Contains(out, state) || !strings.Contains(out, filepath.Join(root, "system.yaml")) {
+			t.Fatalf("auto-config CLI: %s (%v)", out, err)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(state, onboardingStateFile)); !os.IsNotExist(err) {
+		t.Fatalf("selected completion remains: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(other, onboardingStateFile)); err != nil {
+		t.Fatalf("other completion changed: %v", err)
+	}
+	if data, err := os.ReadFile(marker); err != nil || string(data) != "keep" {
+		t.Fatalf("unrelated file changed: %v", err)
+	}
 }
 
 func TestOnboardingCLILogLevelsAndStreams(t *testing.T) {

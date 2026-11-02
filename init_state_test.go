@@ -43,7 +43,7 @@ func TestConfigStateDirectory(t *testing.T) {
 				t.Fatal(err)
 			}
 			stateConfigTestArgs(t, tc.args...)
-			config, err := getConfig()
+			config, err := getConfigWithPaths([]string{"./config.yaml"})
 			if tc.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 					t.Fatalf("error=%v, want %q", err, tc.wantErr)
@@ -87,7 +87,7 @@ func TestConfigResetMode(t *testing.T) {
 				}
 			}
 			stateConfigTestArgs(t, append(tc.args, "--state-dir", filepath.Join(root, "state"))...)
-			config, err := getConfig()
+			config, err := getConfigWithPaths([]string{"./config.yaml"})
 			if tc.wantErr != "" {
 				if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
 					t.Fatalf("error=%v, want %q", err, tc.wantErr)
@@ -107,5 +107,65 @@ func TestConfigResetMode(t *testing.T) {
 				t.Fatalf("config parsing touched state directory: %v", err)
 			}
 		})
+	}
+}
+
+func TestConfigSearch(t *testing.T) {
+	for _, tc := range []struct {
+		name, system, local, want string
+		args                      []string
+		wantErr                   bool
+	}{
+		{name: "system wins", system: "state-dir: /system/state\n", local: "state-dir: /local/state\n", want: "/system/state"},
+		{name: "local fallback", local: "state-dir: /local/state\n", want: "/local/state"},
+		{name: "explicit local overrides system", system: "state-dir: /system/state\n", local: "state-dir: /local/state\n", args: []string{"--config", "config.yaml"}, want: "/local/state"},
+		{name: "missing defaults", want: defaultStateDir},
+		{name: "disabled", system: "invalid: [", args: []string{"--config", ""}, want: defaultStateDir},
+		{name: "explicit missing", system: "state-dir: /system/state\n", args: []string{"--config", "missing.yaml"}, wantErr: true},
+		{name: "malformed system does not fall back", system: "invalid: [", local: "state-dir: /local/state\n", wantErr: true},
+		{name: "invalid system does not fall back", system: "state-dir: relative\n", local: "state-dir: /local/state\n", wantErr: true},
+		{name: "CLI state wins", system: "state-dir: /system/state\n", args: []string{"--state-dir", "/cli/state"}, want: "/cli/state"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			t.Chdir(root)
+			paths := []string{filepath.Join(root, "system.yaml"), filepath.Join(root, "config.yaml")}
+			for i, contents := range []string{tc.system, tc.local} {
+				if contents != "" {
+					if err := os.WriteFile(paths[i], []byte(contents), 0600); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			stateConfigTestArgs(t, append([]string{"--reset-onboarding"}, tc.args...)...)
+			config, err := getConfigWithPaths(paths)
+			if tc.wantErr {
+				if err == nil {
+					t.Fatal("expected configuration error")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			if config.StateDir != tc.want {
+				t.Fatalf("state=%q, want %q", config.StateDir, tc.want)
+			}
+		})
+	}
+}
+
+func TestConfigSearchUnreadable(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses file permissions")
+	}
+	root := t.TempDir()
+	path := filepath.Join(root, "system.yaml")
+	if err := os.WriteFile(path, []byte("state-dir: /system/state\n"), 0000); err != nil {
+		t.Fatal(err)
+	}
+	stateConfigTestArgs(t, "--reset-onboarding")
+	if _, err := getConfigWithPaths([]string{path, filepath.Join(root, "missing.yaml")}); err == nil || !strings.Contains(err.Error(), path) {
+		t.Fatalf("error=%v, want unreadable configuration path", err)
 	}
 }

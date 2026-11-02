@@ -80,7 +80,7 @@ sudo systemctl enable --now sztp-client.service
 sudo journalctl -u sztp-client.service -b --no-pager
 ```
 
-This starts provisioning immediately and enables boot starts. Systemd creates `/var/lib/sztp-client` and passes it as `--state-dir`; the client checks saved completion.
+This starts provisioning immediately and enables boot starts. The client reads `/etc/sztp-client/config.yaml` and creates the selected state directory with permissions `0700` if needed. The default is `/var/lib/sztp-client`. It checks saved completion before provisioning.
 
 ### Check whether provisioning finished
 
@@ -133,48 +133,32 @@ Storage is checked before provisioning. Storage errors and unreadable, malformed
 
 ### Store state on another mount
 
-Create a persistent directory, such as `/mnt/persistent/sztp-client`, owned by the service user with permissions `0700`. Run `sudo systemctl edit sztp-client.service` and add:
+If `/var/lib` is not persistent, use another mount to retain state across reboots and prevent repeated provisioning. Create the directory owned by the service user with permissions `0700`.
 
-```ini
-[Unit]
-RequiresMountsFor=
-RequiresMountsFor=/mnt/persistent/sztp-client
-
-[Service]
-StateDirectory=
-ExecStart=
-ExecStart=/usr/local/bin/sztp-client --config=/etc/sztp-client/config.yaml --state-dir=/mnt/persistent/sztp-client
-```
-
-Then reload and restart:
-
-```sh
-sudo systemctl daemon-reload
-sudo systemctl restart sztp-client.service
-```
-
-`StateDirectory=` accepts names below `/var/lib`, not absolute paths. The CLI path overrides YAML; use it for reset too.
+Set `state-dir` in `/etc/sztp-client/config.yaml`. In a drop-in (`sudo systemctl edit sztp-client.service`), point `RequiresMountsFor` at that directory so startup waits for the mount. Run `sudo systemctl daemon-reload`, then restart the service.
 
 ## Provision a device again
 
-For systemd:
+For the supplied systemd service, the reset command automatically finds `/etc/sztp-client/config.yaml` and uses the same state directory. With the binary on PATH:
 
 ```sh
 sudo systemctl stop sztp-client.service
-sudo /usr/local/bin/sztp-client --reset-onboarding --state-dir=/var/lib/sztp-client --config=""
+sudo sztp-client --reset-onboarding
 sudo systemctl start sztp-client.service
 ```
 
-For manual runs, stop the client first:
+If your service overrides `--config` or `--state-dir`, pass the same selections to reset. For manual runs, stop the client first:
 
 ```sh
 ./sztp-client --reset-onboarding --state-dir="$HOME/.local/state/sztp-client" --config=""
 ```
 
-Reset cleans the workspace, removes completion and pending reports, then exits without provisioning. Missing or malformed records are accepted. No credentials are needed; `--config=""` skips configuration loading. Start normally to reprovision. Reset cannot run concurrently or with discovery-only flags.
+Reset cleans the workspace, removes completion and pending reports, then exits without provisioning. Missing or malformed records are accepted. No credentials are needed. `--config=""` skips configuration loading. Start normally to reprovision. Reset cannot run concurrently or with discovery-only flags.
 
 ## Upgrade an installation
 
-Wait for provisioning to finish. Install and verify the updated binary and service, then run `systemctl daemon-reload`. The next start uses them; keep completion state.
+Before replacing an older service unit, verify that `state-dir` in `/etc/sztp-client/config.yaml` matches the directory previously selected by the service. Older units passed `--state-dir` explicitly and could override a different YAML value. Check custom `ExecStart` or `StateDirectory` overrides too. Preserve the existing state and align overrides with YAML, or continue supplying matching explicit selections for reset. State is not migrated automatically.
+
+Wait for provisioning to finish. Install and verify the updated binary and service, then run `systemctl daemon-reload`. The next start uses them. Keep completion state.
 
 Devices without completion records provision on their first run. Review [DHCP selection](usage.md#find-the-server-through-dhcp) and [script paths](usage.md#write-provisioning-scripts) before upgrading older installations. Exclude completion records from reusable images and remove them during factory reset.

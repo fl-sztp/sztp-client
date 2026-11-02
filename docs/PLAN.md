@@ -81,7 +81,7 @@ Accept focused regressions, Linux checks, matching help/examples and `reuse lint
 ### Command-Line Manual Page
 
 - [ ] Add English `docs/man/sztp-client.1`, tracked roff with SPDX, no generator: NAME, SYNOPSIS, DESCRIPTION, OPTIONS, FILES, ENVIRONMENT, NOTES, EXAMPLES, SEE ALSO.
-- [ ] Cover all flags/defaults/exclusions, YAML/CLI precedence, credentials and relative paths; distinguish `./config.yaml` from `/etc/sztp-client/config.yaml`.
+- [ ] Cover all flags/defaults/exclusions, YAML/CLI precedence, credentials and relative paths. Document automatic `/etc/sztp-client/config.yaml` before `./config.yaml`, explicit-file selection and disabled file loading.
 - [ ] Cover state/reset, pending reports, cleanup, script working directories, privileges, stdout/stderr, protocol limits, exit statuses 0/1/2 and discovery success. Give implemented examples for all three modes.
 - [ ] Add startup/mandatory-credential instructions and `man sztp-client` to `--help`, matching [deployment](deployment.md#install-a-systemd-service).
 - [ ] Follow [installation rules](development.md#installed-files-and-service-integration). Check `mandoc -Tlint`, `man -l`, help agreement, `reuse lint`, installed `man sztp-client` and rebuilt-RPM `rpmlint`.

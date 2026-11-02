@@ -25,10 +25,14 @@ const (
 )
 
 func main() {
+	runClient(getConfig)
+}
+
+func runClient(loadConfig func() (*Config, error)) {
 	logger := logging.New(os.Stderr, false)
 	slog.SetDefault(logger)
 
-	config, err := getConfig()
+	config, err := loadConfig()
 	if err != nil {
 		logger.Error("Failed to initialize configuration", "error", err)
 		os.Exit(1)
@@ -37,6 +41,11 @@ func main() {
 	logger = logging.New(os.Stderr, config.UseDebug)
 	slog.SetDefault(logger)
 	logger.Debug("Debug mode enabled")
+	if config.configPath != "" {
+		logger.Info("Using configuration file", "path", config.configPath)
+	} else {
+		logger.Info("Using configuration defaults and command-line settings")
+	}
 	if config.DiscoverOnly {
 		os.Exit(runDiscoveryReport(os.Stdout, logger, config, sztpclient.DiscoverDeviceInformation, dhcpclient.GetServerFromDHCP4, dhcpclient.GetServerFromDHCP6))
 	}
