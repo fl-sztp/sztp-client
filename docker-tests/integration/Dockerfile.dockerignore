@@ -10,11 +10,11 @@
 !LICENSE
 !COPYING
 !NOTICE
-!docker-setup/collect-licenses.sh
-!docker-setup/integration/*.go
-!docker-setup/integration/fixture/*.go
-!docker-setup/integration/internal/control/*.go
-!docker-setup/integration/entrypoint.sh
+!scripts/collect-licenses.sh
+!docker-tests/integration/*.go
+!docker-tests/integration/fixture/*.go
+!docker-tests/integration/internal/control/*.go
+!docker-tests/integration/entrypoint.sh
 
 # Exclude hidden local files at every directory level.
 **/.*

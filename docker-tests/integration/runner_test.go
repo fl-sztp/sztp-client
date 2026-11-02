@@ -168,7 +168,7 @@ esac
 			}
 			destination := filepath.Join(root, "collected notices")
 			runCollector := func() ([]byte, error) {
-				cmd := exec.Command("/bin/sh", "../collect-licenses.sh", destination, ".")
+				cmd := exec.Command("/bin/sh", "../../scripts/collect-licenses.sh", destination, ".")
 				cmd.Env = append(os.Environ(), "PATH="+bin+":"+os.Getenv("PATH"), "LICENSE_TEST_MODULE="+module, "LICENSE_TEST_GOROOT="+goroot, "LICENSE_TEST_FAILURE="+tc.failure)
 				return cmd.CombinedOutput()
 			}

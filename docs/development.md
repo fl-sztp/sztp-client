@@ -15,7 +15,7 @@ Use this guide to test changes or package releases. For building and running, se
 
 ## Run unit tests and static checks
 
-The module requires Go **1.27.0 or later**; both Docker builders pin **1.27.1**. Release builds may use newer patched compilers. Target hosts need no Go installation. [Go 1.26 compatibility](PLAN.md#go-126-compatibility) remains planned.
+The module requires Go **1.27.0 or later**. The Docker test builder pins **1.27.1**. Release builds may use newer patched compilers. Target hosts need no Go installation. Lowering the minimum requires explicit rejection of malformed UTF-8 in hostnames and compatibility verification, tracked in [Go 1.26 compatibility](PLAN.md#go-126-compatibility).
 
 On Linux, from the repository root:
 
@@ -35,6 +35,8 @@ Go 1.26.10 passed `go vet` and Linux/amd64 and Linux/arm64 cross-builds. Version
 
 ## Test DHCP discovery with Docker
 
+Docker is used only for testing. The automated environment lives in `docker-tests/integration/`. Install the client on target devices as a [Linux binary or systemd service](deployment.md).
+
 Use Bash and Docker Desktop or rootful Linux Docker Engine with:
 
 - BuildKit and Compose **2.27.1 or later** for [service network `driver_opts`](https://docs.docker.com/reference/compose-file/services/#driver_opts).
@@ -44,19 +46,19 @@ Use Bash and Docker Desktop or rootful Linux Docker Engine with:
 Host Go and device certificates are unnecessary. From the repository root, run all 89 cases:
 
 ```sh
-bash docker-setup/integration/run.sh
+bash docker-tests/integration/run.sh
 ```
 
 Quick mode runs 85, omitting four timeout/retry checks:
 
 ```sh
-bash docker-setup/integration/run.sh --quick
+bash docker-tests/integration/run.sh --quick
 ```
 
 Select a case by its exact catalog name:
 
 ```sh
-bash docker-setup/integration/run.sh --case v4_rfc_single
+bash docker-tests/integration/run.sh --case v4_rfc_single
 ```
 
 `--quick` accepts cases such as `v6_text_hostname`, but excludes timing cases such as `silent_v6_timeout_then_retry`. See `--help`. Client, device-information, DHCP, address-validation, fixture and control unit tests run in every mode.
@@ -145,7 +147,7 @@ Retryable bootstrap/reporting failures use `WARN` with `error`; terminal startup
 
 ### Build and runtime requirements
 
-Source packages need project/dependency sources and build instructions. RPM `BuildRequires` includes Go and build tools; `Requires` covers installed-program dependencies. Binary installation needs no Go compiler. Match target OS/architecture and include any shared-library dependencies. Both Docker builders use `CGO_ENABLED=0`.
+Source packages need project/dependency sources and build instructions. RPM `BuildRequires` includes Go and build tools. `Requires` covers installed-program dependencies. Binary installation needs no Go compiler. Match target OS/architecture and include any shared-library dependencies. The Docker test builder uses `CGO_ENABLED=0`.
 
 ### Installed files and service integration
 
@@ -159,13 +161,13 @@ The service runs as root with persistent state. Include the [deployment guide](d
 
 Distribute the [Apache license](../LICENSE) and applicable third-party licenses, copyright notices and NOTICE attributions for linked dependencies.
 
-Both Docker builds collect unchanged dependency and Go toolchain notices under `/usr/share/licenses/sztp-client/`; `modules.txt` lists dependency versions. Integration images include test-binary notices.
+The Docker test build collects unchanged dependency and Go toolchain notices under `/usr/share/licenses/sztp-client/`. `modules.txt` lists dependency versions. The test image includes test-binary notices.
 
 For standalone ARM64 binaries:
 
 ```sh
 CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
-  sh docker-setup/collect-licenses.sh /tmp/sztp-client-licenses .
+  sh scripts/collect-licenses.sh /tmp/sztp-client-licenses .
 ```
 
 Distribute the collected directory with the binary. Match `GOOS`, `GOARCH`, `CGO_ENABLED`, build tags and package selection. Collection is conservative; review compatibility and base-image/OS-package licenses separately.

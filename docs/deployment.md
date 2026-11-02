@@ -9,7 +9,6 @@ Install the client and manage saved state here. See the [quick start](../README.
 
 - [Build a Linux binary](#build-a-linux-binary)
 - [Install a systemd service](#install-a-systemd-service)
-- [Run in Docker](#run-in-docker)
 - [Understand completion reporting](#understand-completion-reporting)
 - [Manage the state directory](#manage-the-state-directory)
 - [Provision a device again](#provision-a-device-again)
@@ -88,31 +87,6 @@ This starts provisioning immediately and enables boot starts. Systemd creates `/
 Check the journal and `/var/lib/sztp-client/onboarded.json`. A successful `systemctl start` means the binary started: `active (running)` can include provisioning or reporting retries. After a successful exit, `inactive (dead)` means it finished. “Already onboarded” means provisioning was skipped.
 
 The service waits for network-online and the state mount. With `Type=exec`, ordered services can start once the binary executes, before provisioning finishes. Failed processes restart after 60 seconds. `TimeoutStartSec=0` disables the binary startup timeout.
-
-## Run in Docker
-
-Build from the repository root:
-
-```sh
-docker build -f docker-setup/Dockerfile -t fl-sztp-client .
-```
-
-Create `config.yaml` and `certs/` at the repository root. Configure a reachable `server`, device identity and credential paths under `/root/certs`, then run:
-
-```sh
-docker run --rm \
-  --mount type=bind,src="$PWD/config.yaml",dst=/root/config.yaml,readonly \
-  --mount type=bind,src="$PWD/certs",dst=/root/certs,readonly \
-  --mount type=volume,src=sztp-client-state,dst=/var/lib/sztp-client \
-  fl-sztp-client /usr/local/bin/fl-sztp-client \
-  --config=/root/config.yaml --state-dir=/var/lib/sztp-client
-```
-
-Logs appear in the terminal. The volume preserves state after container removal; use one per device.
-
-The [DHCPv4](../docker-setup/docker-compose-dhcp4.yml) and [DHCPv6](../docker-setup/docker-compose-dhcp6.yml) labs mount the same host paths read-only. Set `server: ""` or remove it: the example's fixed server otherwise bypasses DHCP during provisioning. Discovery-only modes still probe DHCP.
-
-The labs enable `--insecure` and set identity and credential flags. Supply `first_private_key.pem`, `first_my_cert.pem` and `opi.pem`, or adjust those flags. Add persistent storage at `/var/lib/sztp-client`. See [automated DHCP tests](development.md#test-dhcp-discovery-with-docker).
 
 ## Understand completion reporting
 

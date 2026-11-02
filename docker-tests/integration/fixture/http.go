@@ -10,7 +10,7 @@ import (
 	"io"
 	"net/http"
 
-	"fl-sztp-client/docker-setup/integration/internal/control"
+	"fl-sztp-client/docker-tests/integration/internal/control"
 )
 
 func (f *fixture) routes() http.Handler {

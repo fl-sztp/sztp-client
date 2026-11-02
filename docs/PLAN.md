@@ -42,7 +42,7 @@ Document current code/help without behavior/API changes.
 - [ ] **Redirects/scripts:** First redirect only; its trust anchor is ignored, configured credentials/anchor retained. Context cancellation does not terminate running scripts; distinguish direct child signals sent by systemd/process management.
 - [ ] **Coverage/CI:** Verify 89 full / 85 quick cases, unit tests in every mode and REUSE versus [planned CI](#ci-workflows-and-local-validation). Change [development.md](development.md) only for proven catalog/runner/workflow discrepancies.
 
-[DHCP lab preparation](#dhcp-lab-preparation) is complete. Accept accurate guides, working links, `reuse lint` and changed-document `reuse lint-file` passes. Preserve notices and report unresolved ownership.
+[DHCP lab preparation](development.md#test-dhcp-discovery-with-docker) is complete. Accept accurate guides, working links, `reuse lint` and changed-document `reuse lint-file` passes. Preserve notices and report unresolved ownership.
 
 ### Provisioning Script Startup Cancellation
 
@@ -94,7 +94,7 @@ Target `go 1.26.0` with current dependencies; no target-host Go requirement or r
 
 - [ ] Check `utf8.ValidString(hostname)` before IDNA in `serveraddr.normalizeHostname`; preserve hostname errors and valid Unicode.
 - [ ] Retain malformed UTF-8 regression; verify normalization/DHCP parsing on Go 1.26 and 1.27.
-- [ ] Update module minimum, README and development guide; pin both Docker builders to an available, verified, security-patched Go 1.26 image.
+- [ ] Update module minimum, README and development guide. Pin the Docker test builder to an available, verified, security-patched Go 1.26 image.
 - [ ] Extend [CI](#ci-workflows-and-local-validation) to both versions without automatic toolchain upgrades once the fix/minimum are ready.
 
 Accept Linux checks on both versions, Linux/amd64 and Linux/arm64 builds, and all 89 Docker cases with the updated builder before lowering the minimum.
@@ -122,7 +122,7 @@ Keep [REUSE](../.github/workflows/reuse.yml); add `.github/workflows/ci.yml`. Bo
   | Formatting/workflows | Fail on nonempty `gofmt -l` without rewriting. Run [actionlint](https://github.com/rhysd/actionlint/blob/main/docs/checks.md) on every workflow. |
   | Linux tests | Run the Linux checks above as an ordinary user, with CGO/C compiler. |
   | Linux builds | Static Linux/amd64 and Linux/arm64 builds with [documented settings](deployment.md#build-a-linux-binary). |
-  | DHCP integration | Full `bash docker-setup/integration/run.sh`, no `--quick`, using the existing Docker builder. |
+  | DHCP integration | Full `bash docker-tests/integration/run.sh`, no `--quick`, using the existing Docker builder. |
 
 - [ ] Use latest Go 1.27 patch for host jobs, `GOTOOLCHAIN=local`, recording resolved versions. Add 1.26 after its fix/minimum update.
 - [ ] Pin actions to verified commits; set `contents: read` and job timeouts.
@@ -229,10 +229,6 @@ Test configuration/image handlers for:
 Accept adding either capability without SZTP-layer changes. Real handlers/installers need hardware acceptance.
 
 ## Completed Work
-
-### DHCP Lab Preparation
-
-- [x] [Compose instructions](deployment.md#run-in-docker) require `server: ""` or removal for DHCP provisioning: Compose does not override the example's fixed server. Discovery-only modes still probe with configured servers.
 
 ### Bootstrap Redirect Address Validation
 

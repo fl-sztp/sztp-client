@@ -22,7 +22,7 @@ This project has been made possible by [FusionLayer Inc](https://www.fusionlayer
 
 ## Quick start
 
-Run these steps on the target Linux device. For installation at boot or in a container, see [deployment](docs/deployment.md).
+Run these steps on the target Linux device. For installation at boot, see [deployment](docs/deployment.md).
 
 ### 1. Build the client
 
@@ -58,7 +58,7 @@ Progress and script output appear on stderr. The client exits successfully after
 
 ## How completion works
 
-The client records successful provisioning in its state directory. On subsequent runs, the client reads this record and skips provisioning. If the final report is still pending, the client retries reporting without rerunning scripts. Keep the state directory across restarts and container replacements.
+The client records successful provisioning in its state directory. On subsequent runs, the client reads this record and skips provisioning. If the final report is still pending, the client retries reporting without rerunning scripts. Keep the state directory across restarts and upgrades.
 
 If a run is interrupted before completion is saved, the client may run earlier scripts again. Write scripts so they can safely run more than once. Temporary files are removed after provisioning. Install anything you need to keep outside the workspace.
 
@@ -75,7 +75,7 @@ Linux is the current target. Other operating systems and full RFC 8572 behavior 
 | I want to… | Read |
 | --- | --- |
 | Change settings, test DHCP or write provisioning scripts | [Using the client](docs/usage.md) |
-| Install with systemd or Docker, inspect state or reprovision | [Deployment and maintenance](docs/deployment.md) |
+| Install with systemd, inspect state or reprovision | [Deployment and maintenance](docs/deployment.md) |
 | Run tests or prepare a distribution | [Development](docs/development.md) |
 
 ## Contributing and credits

@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"fl-sztp-client/docker-setup/integration/internal/control"
+	"fl-sztp-client/docker-tests/integration/internal/control"
 )
 
 const canonicalOrigin = "https://bootstrap:8080"

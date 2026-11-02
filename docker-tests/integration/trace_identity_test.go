@@ -7,7 +7,7 @@ package integration
 
 import (
 	"encoding/hex"
-	"fl-sztp-client/docker-setup/integration/internal/control"
+	"fl-sztp-client/docker-tests/integration/internal/control"
 	"github.com/insomniacslk/dhcp/dhcpv4"
 	"github.com/insomniacslk/dhcp/dhcpv6"
 	"github.com/insomniacslk/dhcp/iana"

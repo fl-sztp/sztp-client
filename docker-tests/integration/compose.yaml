@@ -21,7 +21,7 @@ services:
     <<: *runtime
     build:
       context: ${SZTP_DHCP_REPOSITORY:?Run integration/run.sh to set the repository path}
-      dockerfile: docker-setup/integration/Dockerfile
+      dockerfile: docker-tests/integration/Dockerfile
     command: [fixture]
     networks:
       dhcp:
