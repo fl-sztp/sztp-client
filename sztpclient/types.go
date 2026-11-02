@@ -45,7 +45,7 @@ type BootstrapServerRedirectInfo struct {
 
 type BootstrapServerOnboardingInfo struct {
 	IetfSztpConveyedInfoOnboardingInformation struct {
-		InfoTimestampReference string // [not received in json] This is the reference to know exactly the time file downloaded and reference to the artifacts of a specific request
+		InfoTimestampReference string
 		BootImage              struct {
 			DownloadURI       []string `json:"download-uri"`
 			ImageVerification []struct {

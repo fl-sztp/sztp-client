@@ -11,8 +11,6 @@ The client has been tested with [FusionLayer Xverse](https://www.fusionlayer.com
 
 The command-line application is currently the supported way to use this project. Its Go packages are implementation details and do not provide a stable public library API. Library support may be introduced in the future if there is a need for it.
 
-This project has been made possible by [FusionLayer Inc](https://www.fusionlayer.com).
-
 ## Requirements
 
 - Linux. Development and testing focus on Ubuntu.

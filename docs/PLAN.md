@@ -5,21 +5,23 @@ SPDX-License-Identifier: Apache-2.0
 
 # Development Plan
 
-Tasks follow increasing effort, not urgency; dependencies take precedence. [Release preparation](#release-preparation) and device support are independent; [completed work](#completed-work) follows last.
+Tasks follow increasing effort, not urgency. Dependencies take precedence. [Release preparation](#release-preparation) and device support are independent. [Completed work](#completed-work) follows last.
 
 | Order | Open task | Dependency or boundary |
 |---|---|---|
 | 1 | [Documentation corrections](#documentation-corrections) | Describe current behavior. |
-| 2 | [Script startup cancellation](#provisioning-script-startup-cancellation) | Does not terminate running scripts. |
-| 3 | [Human-readable HTTP response sizes](#human-readable-http-response-sizes) | Extend completed HTTP limits. Preserve default byte counts. |
-| 4 | [Manual page](#command-line-manual-page) | Document implemented behavior. |
-| 5 | [Go 1.26 compatibility](#go-126-compatibility) | Validate before lowering the minimum. |
-| 6 | [TLS credential validation](#tls-credential-validation) | Preserve mode-specific behavior. |
-| 7 | [CI workflows](#ci-workflows-and-local-validation) | Start on Go 1.27. Add 1.26 after compatibility work. |
-| 8 | [Bootstrap diagnostics](#bootstrap-error-diagnostics) | Reuse completed HTTP limits. |
-| 9 | [DHCP retry and cancellation](#dhcp-retry-and-cancellation) | Preserve explicit-server precedence. |
-| 10 | [NetworkManager compatibility](#networkmanager-compatibility) | Gather evidence before choosing integration. |
-| 11 | [Device-specific configuration and boot images](#device-specific-configuration-and-boot-images) | Shared architecture before real BF3 handlers. |
+| 2 | [Unused onboarding timestamp field](#unused-onboarding-timestamp-field) | Assess compatibility before deciding removal. |
+| 3 | [Script startup cancellation](#provisioning-script-startup-cancellation) | Does not terminate running scripts. |
+| 4 | [Human-readable HTTP response sizes](#human-readable-http-response-sizes) | Extend completed HTTP limits. Preserve default byte counts. |
+| 5 | [Manual page](#command-line-manual-page) | Document implemented behavior. |
+| 6 | [Go 1.26 compatibility](#go-126-compatibility) | Validate before lowering the minimum. |
+| 7 | [TLS credential validation](#tls-credential-validation) | Preserve mode-specific behavior. |
+| 8 | [CI workflows](#ci-workflows-and-local-validation) | Start on Go 1.27. Add 1.26 after compatibility work. |
+| 9 | [Bootstrap diagnostics](#bootstrap-error-diagnostics) | Reuse completed HTTP limits. |
+| 10 | [DHCP retry and cancellation](#dhcp-retry-and-cancellation) | Preserve explicit-server precedence. |
+| 11 | [NetworkManager compatibility](#networkmanager-compatibility) | Gather evidence before choosing integration. |
+| 12 | [Docker server interoperability](#docker-sztp-server-interoperability) | Measure compatibility before client fixes. Extend planned CI. |
+| 13 | [Device-specific configuration and boot images](#device-specific-configuration-and-boot-images) | Shared architecture before real BF3 handlers. |
 
 ## Release Preparation
 
@@ -38,20 +40,35 @@ go test -mod=readonly -race ./...
 Document current code/help without behavior/API changes.
 
 - [ ] **Exit statuses:** In [usage.md](usage.md), explain 0 = success, 1 = application error (including incompatible flags), 2 = CLI parsing error. Distinguish discovery failure from report-writing/other errors.
-- [ ] **TLS:** Host-meta/POST discard credential-loading errors; final reporting checks certificates/key and trust anchor. Explain local failures appearing as bootstrap network retries; link [planned validation](#tls-credential-validation).
-- [ ] **Redirects/scripts:** First redirect only; its trust anchor is ignored, configured credentials/anchor retained. Context cancellation does not terminate running scripts; distinguish direct child signals sent by systemd/process management.
+- [ ] **TLS:** Host-meta/POST discard credential-loading errors. Final reporting checks certificates/key and trust anchor. Explain local failures appearing as bootstrap network retries. Link [planned validation](#tls-credential-validation).
+- [ ] **Redirects/scripts:** First redirect only. Its trust anchor is ignored, configured credentials/anchor retained. Context cancellation does not terminate running scripts. Distinguish direct child signals sent by systemd/process management.
 - [ ] **Coverage/CI:** Verify 89 full / 85 quick cases, unit tests in every mode and REUSE versus [planned CI](#ci-workflows-and-local-validation). Change [development.md](development.md) only for proven catalog/runner/workflow discrepancies.
 
 [DHCP lab preparation](development.md#test-dhcp-discovery-with-docker) is complete. Accept accurate guides, working links, `reuse lint` and changed-document `reuse lint-file` passes. Preserve notices and report unresolved ownership.
 
+### Unused Onboarding Timestamp Field
+
+Assess whether `InfoTimestampReference` can be removed from `BootstrapServerOnboardingInfo` in `sztpclient/types.go`. Assessment and the removal decision remain open.
+
+Repository inspection found only the field declaration, with no named reads or writes and no use in artifact naming, state management or completion reporting. No repository example or test requires the JSON key. Removing the old misleading comment did not remove the field.
+
+Removal changes accepted input: JSON decoding can currently populate the field from `InfoTimestampReference`. The existing `DisallowUnknownFields()` in `sztpclient/client.go` would reject that key after removal. The field is also part of an exported Go structure, so external callers could depend on it. External compatibility has not been verified.
+
+- [ ] Check whether supported bootstrap servers or known external Go callers require the field. Record the evidence and any remaining uncertainty.
+- [ ] Record the compatibility assessment and an explicit removal decision. Repository evidence currently supports removal, subject to that assessment.
+- [ ] If removal is approved, remove the field without a replacement or compatibility abstraction. Extend `TestOnboardingConveyedInformationValidation` to require rejection of `InfoTimestampReference` without scripts, leftover artifacts, persisted completion or completion reports. Retain valid onboarding cases and run Linux checks.
+
+This entry records investigation and a possible later cleanup only. No application or test changes are part of the documentation task.
+
 ### Provisioning Script Startup Cancellation
 
-`runConfiguration` can launch after cancellation during its start report.
+Cancellation during a script's start report does not prevent the script from starting. `runConfiguration` in `sztpclient/configuration.go` checks the caller's context before sending the network-based start report, but continues to `cmd.Run()` if cancellation occurs during reporting. A new device-modifying pre- or post-configuration script can therefore start after a shutdown request. Remediation remains open.
 
-- [ ] Recheck `ctx.Err()` after reporting, immediately before pre/post execution. Return context errors, preserving cancellation/deadline `errors.Is` through bootstrap wrapping.
-- [ ] Keep active-context reporting best effort: report failure alone must not block scripts.
-- [ ] Cancel deterministically in each phase's start-report handler, without sleeps. Assert no phase execution marker, bootstrap cancellation errors and no completion. Pre may finish before post cancellation.
-- [ ] Retain uncanceled success/failed-report tests; distinguish startup checks from running-script termination.
+- [ ] Recheck `ctx.Err()` after reporting, immediately before `cmd.Run()` in both phases. Return the context error without starting the script, preserving cancellation/deadline `errors.Is` through bootstrap wrapping.
+- [ ] Keep start reporting best effort while the caller's context is active. A report failure alone must not block scripts.
+- [ ] Cancel the caller's context deterministically in each phase's start-report server handler. Use synchronization rather than sleeps or timing-based waits.
+- [ ] Assert with script-created execution markers that pre-phase cancellation starts neither script. For post-phase cancellation, allow pre to finish but assert that post never starts.
+- [ ] Assert `context.Canceled` through the bootstrap error chain and no successful completion. Retain uncanceled success and failed-start-report regressions.
 
 Accept both regressions and Linux checks. Running-script termination, process groups and rollback remain outside scope.
 
@@ -59,11 +76,11 @@ Accept both regressions and Linux checks. Running-script termination, process gr
 
 Extend all three [response limits](usage.md#bound-http-requests) in YAML/CLI, preserving integer bytes. Use a shared standard-library parser with exact decimal arithmetic.
 
-- [ ] Add internal `parseByteSize(string) (int64, error)` to `resolveHTTPRequestLimits` in `init.go`; retain raw YAML until explicit CLI overrides.
-- [ ] Accept optional `+`, digits with optional `.digits`, case-insensitive suffixes, surrounding whitespace and whitespace before units. No suffix/`B` means bytes; `K/M/G/T` and `KB/MB/GB/TB` mean powers of 1000, `KiB/MiB/GiB/TiB` powers of 1024. Reject commas, exponents, fractions (`1/2MiB`) and unknown units.
-- [ ] Validate syntax before exact multiplication with [`math/big.Rat`](https://pkg.go.dev/math/big#Rat). Require positive integral `int64`, without rounding/floats; reject `0.1KiB` and unitless `1.5`. Retain `HTTPRequestLimits.Validate()`, architecture bounds and overflow-detection extra byte.
+- [ ] Add internal `parseByteSize(string) (int64, error)` to `resolveHTTPRequestLimits` in `init.go`. Retain raw YAML until explicit CLI overrides.
+- [ ] Accept optional `+`, digits with optional `.digits`, case-insensitive suffixes, surrounding whitespace and whitespace before units. No suffix/`B` means bytes. `K/M/G/T` and `KB/MB/GB/TB` mean powers of 1000, `KiB/MiB/GiB/TiB` powers of 1024. Reject commas, exponents, fractions (`1/2MiB`) and unknown units.
+- [ ] Validate syntax before exact multiplication with [`math/big.Rat`](https://pkg.go.dev/math/big#Rat). Require positive integral `int64`, without rounding/floats. Reject `0.1KiB` and unitless `1.5`. Retain `HTTPRequestLimits.Validate()`, architecture bounds and overflow-detection extra byte.
 - [ ] Preserve defaults (1 MiB, 16 MiB, 64 KiB), omitted/null defaults, CLI precedence over invalid YAML scalars, zero/negative rejection, public `HTTPRequestLimits` fields as `int64` and deadline/body-reading contracts. Errors identify options and valid examples.
-- [ ] Update help, [usage](usage.md), [development](development.md#http-request-limits), `config.yaml.example` and planned man page. Show defaults as `1MiB`/`16MiB`/`64KiB`, exact bytes in help, SI/IEC and whole-byte rules; use `--bootstrap-max-response-bytes 32MiB` in usage.
+- [ ] Update help, [usage](usage.md), [development](development.md#http-request-limits), `config.yaml.example` and planned man page. Show defaults as `1MiB`/`16MiB`/`64KiB`, exact bytes in help, SI/IEC and whole-byte rules. Use `--bootstrap-max-response-bytes 32MiB` in usage.
 - [ ] Test all settings via CLI and quoted/unquoted YAML: valid CLI over invalid YAML, case/whitespace, `+`, legacy integers and omitted/null defaults. Assert:
 
   | Input | Bytes |
@@ -76,7 +93,7 @@ Extend all three [response limits](usage.md#bound-http-requests) in YAML/CLI, pr
 
 - [ ] Test malformed/empty/zero/negative values, unknown units, fractional bytes, overflow, architecture boundaries, exact integers above `2^53` on 64-bit and help/default agreement. Retain response-boundary tests.
 
-Accept focused regressions, Linux checks, matching help/examples and `reuse lint` with attribution preserved. Extends [completed limits](#http-request-limits); remains pending validation.
+Accept focused regressions, Linux checks, matching help/examples and `reuse lint` with attribution preserved. Extends [completed limits](development.md#http-request-limits). Remains pending validation.
 
 ### Command-Line Manual Page
 
@@ -90,10 +107,10 @@ Accept repository-independent configuration, result interpretation and safe repr
 
 ### Go 1.26 Compatibility
 
-Target `go 1.26.0` with current dependencies; no target-host Go requirement or restriction on newer patched compilers. See [investigation](development.md#go-126-compatibility-investigation).
+Target `go 1.26.0` with current dependencies. No target-host Go requirement or restriction on newer patched compilers. See the [current Go requirement](development.md#run-unit-tests-and-static-checks).
 
-- [ ] Check `utf8.ValidString(hostname)` before IDNA in `serveraddr.normalizeHostname`; preserve hostname errors and valid Unicode.
-- [ ] Retain malformed UTF-8 regression; verify normalization/DHCP parsing on Go 1.26 and 1.27.
+- [ ] Check `utf8.ValidString(hostname)` before IDNA in `serveraddr.normalizeHostname`. Preserve hostname errors and valid Unicode.
+- [ ] Retain malformed UTF-8 regression. Verify normalization/DHCP parsing on Go 1.26 and 1.27.
 - [ ] Update module minimum, README and development guide. Pin the Docker test builder to an available, verified, security-patched Go 1.26 image.
 - [ ] Extend [CI](#ci-workflows-and-local-validation) to both versions without automatic toolchain upgrades once the fix/minimum are ready.
 
@@ -101,13 +118,16 @@ Accept Linux checks on both versions, Linux/amd64 and Linux/arm64 builds, and al
 
 ### TLS Credential Validation
 
-Bootstrap discards loading errors while final reporting checks them, hiding local failures behind retries or detecting them after provisioning.
+Bootstrap ignores local TLS credential-loading failures. Host-meta and POST requests in `sztpclient/request.go` discard CA-file read errors, the `AppendCertsFromPEM` result and `tls.LoadX509KeyPair` errors. `ReportCompletion` in `sztpclient/progress.go` checks the same credentials. Remediation remains open.
 
-- [ ] Share checked certificate/key/trust-anchor loading across host-meta, bootstrap and progress/resumed reporting. Return read/`tls.LoadX509KeyPair` errors; reject `AppendCertsFromPEM` finding no certificates.
-- [ ] Stop local failures before HTTP/scripts and bootstrap retries; retain pending completion. Preserve `errors.Is` for `ErrReportCredentials` and file errors. Network failures stay retryable.
-- [ ] `--insecure` skips server verification only. Preserve credential-free reset/completed startup and diagnostics that report credential problems while continuing DHCP.
-- [ ] Test missing/unreadable files, malformed PEM, absent CA certificates, mismatched keys and valid credentials across bootstrap/resumed reporting, with/without `--insecure`. Invalid credentials cause no HTTP/scripts even against unauthenticated servers. Run permission tests as ordinary user.
-- [ ] Identify failed inputs without keys/passwords/file contents; document shared validation and terminal local errors.
+Local configuration failures can therefore appear as indefinite network retries. If the server does not require a client certificate, provisioning can proceed with an invalid local key pair and fail only during final reporting.
+
+- [ ] Share checked certificate/key/trust-anchor loading across host-meta, bootstrap, progress and resumed completion reporting. Return read/`tls.LoadX509KeyPair` errors. Reject `AppendCertsFromPEM` finding no certificates. Validate credentials before HTTP requests and provisioning scripts.
+- [ ] Treat local credential configuration failures as terminal before bootstrap retries or reporting backoff. Retain pending completion. Preserve `errors.Is` for `ErrReportCredentials` and underlying file errors. Network failures stay retryable.
+- [ ] `--insecure` skips server verification only, retaining local credential validation. Preserve credential-free reset/completed startup and diagnostics that report credential problems while continuing DHCP.
+- [ ] Test missing/unreadable files, malformed PEM, absent CA certificates, mismatched keys and valid credentials across bootstrap and resumed completion reporting, with/without `--insecure`. Run permission tests as an ordinary user.
+- [ ] Assert zero HTTP requests, script starts and retries for invalid credentials, including against a server that does not require a client certificate. Retain successful mutual TLS, pending-report recovery and credential-independent mode regressions.
+- [ ] Identify failed inputs without passwords, private keys or file contents. Document shared validation and terminal local errors.
 
 Accept focused tests/Linux checks while preserving mutual TLS, pending recovery, HTTP limits/deadlines and documented modes.
 
@@ -136,55 +156,71 @@ Accept local/GitHub passes, both architectures and full DHCP catalog, without ro
 
 ### Bootstrap Error Diagnostics
 
-Audit M1: retain useful reasons without raw bodies in errors/logs/progress. Raw logs/unbounded reads were inherited; current changes also propagate bodies into errors/progress.
+Full bootstrap responses can reach errors, ordinary logs and progress reports. Remediation remains open. No actual disclosure incident was observed during this review.
 
-- [ ] In `sztpclient/request.go`, replace raw-body concatenation with bounded diagnostics: HTTP status, safe parsing errors and approved validation details; unknown formats get generic diagnostics.
-- [ ] Keep reasons such as `post_configuration_script` length errors. Allowed field names cannot authorize arbitrary untrusted server values.
-- [ ] Exclude credentials/configuration/scripts throughout errors, progress and logs, including existing raw-response logging.
-- [ ] Define/document error/report diagnostic-length limits; reuse [M2 limits](#http-request-limits), without another reader or competing transport bounds.
-- [ ] Update `TestBootstrapReportsOriginalValidationError` in `onboarding_bootstrap_test.go` to require reason without body. Test sensitive content, unknown JSON, HTML and below/at/above limits in errors/logs/reports; retain M2 boundary tests.
+When a response matches neither expected JSON structure, `postRequestWithContext` in `sztpclient/request.go` appends the entire body to its error. `RunBootstrapSequence` in `sztpclient/client.go` sends that error in a progress report, and `runBootstrapWithRetry` in `main.go` logs it at WARN. Responses containing configuration or credentials can therefore reach persistent logs. The default 16 MiB bootstrap response limit also permits substantial log volume. Debug logging additionally includes raw request, bootstrap and onboarding contents.
 
-Accept focused/Linux passes: reasons survive, sensitive data is absent and oversized responses fail without unbounded buffering.
+- [ ] Replace raw-body concatenation with bounded diagnostics that preserve HTTP status and safe parsing or validation reasons. Unknown formats get generic diagnostics.
+- [ ] Retain useful reasons such as `post_configuration_script` length errors through approved diagnostics. Neither a known field name nor a server-provided error message authorizes echoing arbitrary untrusted values. Unknown field names may themselves contain sensitive content.
+- [ ] Remove raw request/response and decoded bootstrap/onboarding contents from errors, progress reports and logs, including DEBUG. Preserve useful metadata without credentials, configuration or scripts.
+- [ ] Define/document error/report diagnostic-length limits separately from transport bounds. Reuse [HTTP request limits](development.md#http-request-limits), preserving request deadlines and response-size limits without another reader or competing bounds.
+- [ ] Change `TestBootstrapReportsOriginalValidationError` in `onboarding_bootstrap_test.go` to require a useful safe reason and HTTP status instead of the entire body. Use synthetic secrets and assert their absence from returned errors, WARN/DEBUG logs and progress reports.
+- [ ] Cover expected error structures, unknown/malformed JSON, HTML and diagnostics below/at/above their length limits. Retain HTTP response-boundary tests.
+
+Accept focused/Linux passes: HTTP status and safe reasons survive, synthetic secrets and raw contents are absent from every diagnostic sink, diagnostics remain bounded and oversized responses fail without unbounded buffering.
 
 ### DHCP Retry and Cancellation
 
 Fix [discovery limitations](development.md#dhcp-sockets).
 
 - [ ] Propagate cancellation through both protocols/waits. Test `SIGTERM` during each query/between rounds: prompt stop without normal delays, sockets released.
-- [ ] Rediscover until onboarding succeeds when no server is explicit; initial failures/fallback must not disable discovery. Preserve explicit-server precedence.
-- [ ] Enable DHCP after initial rounds; the same process must discover/use it.
+- [ ] Rediscover until onboarding succeeds when no server is explicit. Initial failures/fallback must not disable discovery. Preserve explicit-server precedence.
+- [ ] Enable DHCP after initial rounds. The same process must discover/use it.
 
-Accept prompt cancellation/recovery without restart; update discovery/fallback documentation.
+Accept prompt cancellation/recovery without restart. Update discovery/fallback documentation.
 
 ### NetworkManager Compatibility
 
 Extend [coverage](development.md#networkmanager-coverage) with evidence.
 
-- [ ] Build repeatable Fedora setup with a NetworkManager-managed interface; separately test DHCPv4 option 143 and DHCPv6 option 136 alongside address acquisition/renewal.
-- [ ] Document Fedora/NetworkManager/client versions, setup, commands/results; distinguish socket errors, missing options and missing responses.
-- [ ] Plan from failures; verify NetworkManager requests/exposes SZTP options before choosing D-Bus/dispatcher integration.
+- [ ] Build repeatable Fedora setup with a NetworkManager-managed interface. Separately test DHCPv4 option 143 and DHCPv6 option 136 alongside address acquisition/renewal.
+- [ ] Document Fedora/NetworkManager/client versions, setup, commands/results. Distinguish socket errors, missing options and missing responses.
+- [ ] Plan from failures. Verify NetworkManager requests/exposes SZTP options before choosing D-Bus/dispatcher integration.
 
-Accept both protocols discovering expected servers without disrupting acquisition/renewal. Document limitations until verified; no plugin/GUI/MOTD commitment.
+Accept both protocols discovering expected servers without disrupting acquisition/renewal. Document limitations until verified. No plugin/GUI/MOTD commitment.
+
+### Docker SZTP Server Interoperability
+
+Measure current client compatibility with independent servers. Client fixes remain separate. The [existing Docker suite](development.md#test-dhcp-discovery-with-docker) covers DHCP, not full provisioning against these servers.
+
+- [ ] **Environment:** Add `docker-tests/interop/` with Compose, selectable Watsen/Google servers and the production client binary. Pin tested versions and generate test credentials/configuration so runs need no manually prepared server.
+- [ ] **Watsen:** Adapt [OPI's RESTCONF initialization](https://github.com/opiproject/sztp/blob/main/scripts/docker-entrypoint.sh). Its [package pin](https://github.com/opiproject/sztpd/blob/main/requirements.txt) is 0.0.15, while [PyPI](https://pypi.org/project/sztpd/) lists 0.0.46 as of 2026-10-28. Verify installation, configuration and package terms before pinning a test version. The old recipe does not prove current compatibility.
+- [ ] **Google:** Run the client directly against [open-sztp](https://github.com/google/open-sztp). Probe endpoints independently so the first failure does not hide later differences: missing [host-meta route](https://github.com/google/open-sztp/blob/d2e4e3daecb3f66c84803270432f0aa553316b36/server.go), [serial-header lookup](https://github.com/google/open-sztp/blob/d2e4e3daecb3f66c84803270432f0aa553316b36/util/stub_dependency_provider.go), and [response fields/CMS SignedData](https://github.com/google/open-sztp/blob/d2e4e3daecb3f66c84803270432f0aa553316b36/handlers/bootstrap_data.go). Record incompatibilities without rewriting responses or claiming mTLS coverage from the default server.
+- [ ] **Provisioning:** Where supported, check TLS, redirect, configuration bytes, pre/post script order, server acknowledgement and persisted completion. Test restart and recovery from a failed final report after completion is saved, without rerunning scripts. Exit status alone cannot prove these outcomes.
+- [ ] **DHCP:** Reuse existing fixtures and retain the discovery catalog. Add one complete provisioning case per DHCP protocol to cover the gap between discovery and onboarding.
+- [ ] **Automation:** Use the same runner locally and in a separate PR/scheduled/manual CI check, extending [planned CI](#ci-workflows-and-local-validation). Preserve failures, results, versions and client/server logs. Isolate runs and always clean containers, networks and state volumes to prevent interference. Leave branch protection unchanged.
+
+Accept reproducible per-server outcomes with environment failures distinguished from interoperability failures. Document commands and demonstrated coverage without claiming full RFC compliance. Upstream source inspection is evidence for test targets, not proof of successful interoperability.
 
 ## Device-Specific Configuration and Boot Images
 
 ### Scope and Interfaces
 
-Client responsibilities: transfer, hardware/OS detection, independent configuration/image handler selection, order and reporting. Compile separate Go interfaces; authentication serials alone do not identify families.
+Client responsibilities: transfer, hardware/OS detection, independent configuration/image handler selection, order and reporting. Compile separate Go interfaces. Authentication serials alone do not identify families.
 
 Build interfaces/selection/reporting/tests before BF3 handlers/installers. Initial configuration must be verifiable/reversible without reboot. GRUB, firmware and image download/install/reboot need separate device designs. One-time onboarding only.
 
 - Configuration handlers validate compatibility/settings, prepare `Commit`/`Rollback`/`Finalize` transactions and recover from persistent data.
-- Image handlers check running images, verify/install replacements; matching images need no install. Start with a test handler.
-- Profiles describe OS/BFB versions, capabilities/differences; platform and configuration-model versions remain separate.
+- Image handlers check running images, verify/install replacements. Matching images need no install. Start with a test handler.
+- Profiles describe OS/BFB versions, capabilities/differences. Platform and configuration-model versions remain separate.
 
-Retain RFC envelope; migrate free-form Base64 configuration to shared JSON containing model ID/version/settings. Models define ownership/deletion: `merge` combines within handler scope, `replace` replaces that scope, never generic JSON merge. Initially handlers perform all owned changes.
+Retain RFC envelope. Migrate free-form Base64 configuration to shared JSON containing model ID/version/settings. Models define ownership/deletion: `merge` combines within handler scope, `replace` replaces that scope, never generic JSON merge. Initially handlers perform all owned changes.
 
 Handlers may use OPI/OVSDB/Linux tools. [OPI API](https://github.com/opiproject/opi-api)/[NVIDIA bridge](https://github.com/opiproject/opi-nvidia-bridge) are candidates, not complete coverage.
 
 ### Behavior and Lifecycle
 
-Validate before changes; select configuration/image support independently:
+Validate before changes. Select configuration/image support independently:
 
 | Situation | Action |
 |---|---|
@@ -206,51 +242,32 @@ Device names do not prove support. No image downloads on skips or script substit
 7. Run optional post script.
 8. Persist completion including skips and finalize transaction.
 
-Transactions cover supported configuration only; boot precedes scripts, commit precedes post script ([RFC 8572 §5.6](https://www.rfc-editor.org/rfc/rfc8572.html#section-5.6)).
+Transactions cover supported configuration only. Boot precedes scripts, commit precedes post script ([RFC 8572 §5.6](https://www.rfc-editor.org/rfc/rfc8572.html#section-5.6)).
 
 ### Completion and Recovery
 
-- `config-complete` requires committed configuration; `boot-image-complete` requires a verified running image, not installer success before reboot.
-- Unsupported operations emit `config-warning`/`boot-image-warning` with operation/device/reason, never success. Persist skips/reasons in journal/completion; include them in `bootstrap-complete` across retries/restarts. Separate local outcome from acknowledgement.
+- `config-complete` requires committed configuration. `boot-image-complete` requires a verified running image, not installer success before reboot.
+- Unsupported operations emit `config-warning`/`boot-image-warning` with operation/device/reason, never success. Persist skips/reasons in journal/completion. Include them in `bootstrap-complete` across retries/restarts. Separate local outcome from acknowledgement.
 - Otherwise successful onboarding with skips completes with warnings. Added support does not repeat provisioning without reset.
 - This deliberately departs from RFC 8572's successful processing of all supplied criteria before `bootstrap-complete`. Preserve wire format, document departure, do not claim full compliance ([§5.6](https://www.rfc-editor.org/rfc/rfc8572.html#section-5.6), [§7.3](https://www.rfc-editor.org/rfc/rfc8572.html#section-7.3)).
-- Journal in existing state directory; restore handler scope on commit/post failure. Recover before retry; stop changes on recovery failure. Journaled success with failed completion persistence must finish persistence/finalization without repeating scripts.
-- Rollback covers handler-owned configuration only; authors own script side effects/cleanup/reruns. Arbitrary shell commands/image replacement are outside guarantees.
+- Journal in existing state directory. Restore handler scope on commit/post failure. Recover before retry. Stop changes on recovery failure. Journaled success with failed completion persistence must finish persistence/finalization without repeating scripts.
+- Rollback covers handler-owned configuration only. Authors own script side effects/cleanup/reruns. Arbitrary shell commands/image replacement are outside guarantees.
 
 ### Acceptance
 
 Test configuration/image handlers for:
 
 - Every table case, configuration-only/image-only support and matching images.
-- Scripts with missing content; both skips plus successful scripts complete with warnings, never false success.
-- Malformed/ambiguous input stopping before changes; supported failures remaining errors.
+- Scripts with missing content. Both skips plus successful scripts complete with warnings, never false success.
+- Malformed/ambiguous input stopping before changes. Supported failures remaining errors.
 - Lifecycle order, commit/post rollback and model-defined merge/replace boundaries.
 - Interrupted recovery, stopping on recovery failure, completion-write recovery without repeated scripts.
-- Durable skip reasons across recovery/retries/restarts; new support requires reset to reprovision.
+- Durable skip reasons across recovery/retries/restarts. New support requires reset to reprovision.
 
 Accept adding either capability without SZTP-layer changes. Real handlers/installers need hardware acceptance.
 
 ## Completed Work
 
-### Bootstrap Redirect Address Validation
-
-MEDIUM finding implemented separately from HTTP limits; upstream concatenation broke IPv6 and only checked positive separate ports.
-
-- [x] `serveraddr.Normalize`/`net.JoinHostPort`: bare IPv6 and HTTP/HTTPS become HTTPS origins; validate embedded ports before authoritative separate port (1..65535).
-- [x] Reject before URL changes/requests; preserve first-entry and one-redirect limits.
-- [x] Test IPv4, bare/bracketed IPv6, hostnames, Unicode, URLs, invalid addresses and missing/negative/zero/oversized ports plus boundaries.
-- [x] Real IPv4-to-IPv6 TLS redirect: scripts once, pending-report resume against saved bracketed IPv6 endpoint.
-
-Validated 2026-10-22: Linux/arm64, Go 1.27.1, UID 65534, all Linux checks. IPv6 regression ran without skip and reproduced the pre-fix invalid-port error. Focused macOS/arm64 tests passed on Go 1.27.2; `reuse lint`/changed-file `reuse lint-file` passed, notices retained.
-
-### HTTP Request Limits
-
-Audit M2 implemented: [independent host-meta/bootstrap/progress bounds](usage.md#bound-http-requests), including redirects/resumed reports. M1 remains open.
-
-- [x] YAML/CLI timeouts/sizes; explicit CLI overrides before validation; reject zero/negative/malformed/overflow.
-- [x] Configurable operational defaults, not protocol requirements: host-meta 30 s / 1 MiB, bootstrap 120 s / 16 MiB, progress 30 s / 64 KiB.
-- [x] Child-context deadlines through reading, preserving earlier deadlines/cancellation; bound decompressed responses, rejecting oversized contents without retaining them.
-- [x] Preserve timeout/cancellation/size-error identities through bootstrap wrapping; retain retries, workspace cleanup and persistent completion.
-- [x] Test stalls, earlier deadlines/cancellation, fixed/chunked/gzip boundaries, bounded reads, precedence, pre-script retry recovery and pending-report limits.
-
-Validated Linux/arm64, Go 1.27.1, ordinary user, all Linux checks. No overall onboarding deadline; DHCP/script cancellation remain separate.
+- DHCP lab preparation: [automated DHCP tests](development.md#test-dhcp-discovery-with-docker).
+- Bootstrap redirect address validation: [address validation](development.md#address-validation).
+- HTTP request limits: [settings and defaults](usage.md#bound-http-requests) and [runtime behavior](development.md#http-request-limits).

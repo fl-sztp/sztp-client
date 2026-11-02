@@ -101,11 +101,11 @@ Restarting with a pending report uses the saved endpoint and serial with current
 
 ### When reporting fails
 
-Reporting starts immediately, then waits **1, 2, 5, 10, 15, then 30 minutes** after failures; further waits stay at 30 minutes. Restarting restarts the sequence.
+Reporting starts immediately, then waits **1, 2, 5, 10, 15, then 30 minutes** after failures. Further waits stay at 30 minutes. Restarting restarts the sequence.
 
-Progress requests default to a 30-second deadline and 64 KiB response limit. Set `progress-timeout` and `progress-max-response-bytes` through [HTTP settings](usage.md#bound-http-requests); pending reports use current settings. Other progress reports are best effort.
+Progress requests default to a 30-second deadline and 64 KiB response limit. Set `progress-timeout` and `progress-max-response-bytes` through [HTTP settings](usage.md#bound-http-requests). Pending reports use current settings. Other progress reports are best effort.
 
-`SIGINT`/`SIGTERM` cancels final reporting or its wait, preserving pending state. Local credential or storage errors stop the process. Reports can repeat if acknowledgement was not saved; reporting failure alone never reruns scripts.
+`SIGINT`/`SIGTERM` cancels final reporting or its wait, preserving pending state. Local credential or storage errors stop the process. Reports can repeat if acknowledgement was not saved. Reporting failure alone never reruns scripts.
 
 ### When scripts can run again
 
@@ -115,21 +115,21 @@ Boot-image handling and automatic configuration application remain [unimplemente
 
 ## Manage the state directory
 
-Use persistent storage. Selection order is `--state-dir`, YAML `state-dir`, then `/var/lib/sztp-client`. Paths must be absolute; empty YAML uses the default, while an empty CLI value is an error. New directories use `0700`; existing permissions are preserved.
+Use persistent storage. Selection order is `--state-dir`, YAML `state-dir`, then `/var/lib/sztp-client`. Paths must be absolute. Empty YAML uses the default, while an empty CLI value is an error. New directories use `0700`. Existing permissions are preserved.
 
 | File | Purpose |
 | --- | --- |
-| `onboarded.json` | Completion time, serial, report endpoint and status; permissions `0600`. |
+| `onboarded.json` | Completion time, serial, report endpoint and status. Permissions `0600`. |
 | `.onboarding.lock` | Locks provisioning, retries and reset. Do not delete it. |
 | `workspace.json` | Registers temporary workspaces for cleanup. |
 
 Version **2** records retain the final endpoint after any redirect, without passwords or TLS keys. Version **1** counts as completed but cannot resume reporting.
 
-Concurrent runs exit **1**; exit or crash releases the lock. Locking supports Linux and macOS; other platforms reject provisioning and reset.
+Concurrent runs exit **1**. Exit or crash releases the lock. Locking supports Linux and macOS. Other platforms reject provisioning and reset.
 
 ### Handle state errors
 
-Storage is checked before provisioning. Storage errors and unreadable, malformed or unknown-version records stop the client with exit **1**, without falling back to `/tmp`. A failed completion write stops without retrying scripts. Check logs and permissions; reset only to provision again.
+Storage is checked before provisioning. Storage errors and unreadable, malformed or unknown-version records stop the client with exit **1**, without falling back to `/tmp`. A failed completion write stops without retrying scripts. Check logs and permissions. Reset only to provision again.
 
 ### Store state on another mount
 
