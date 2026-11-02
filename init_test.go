@@ -34,7 +34,48 @@ func TestHTTPRequestLimitsConfig(t *testing.T) {
 	if err != nil || c.RequestLimits != defaults {
 		t.Fatalf("default config = %+v, error=%v", c, err)
 	}
-	for _, option := range httpLimitOptions(&Config{}) {
+	for _, option := range []struct {
+		name    string
+		timeout func(*sztpclient.HTTPRequestLimits) *time.Duration
+		bytes   func(*sztpclient.HTTPRequestLimits) *int64
+	}{
+		{
+			name: "host-meta-timeout",
+			timeout: func(limits *sztpclient.HTTPRequestLimits) *time.Duration {
+				return &limits.HostMetaTimeout
+			},
+		},
+		{
+			name: "bootstrap-timeout",
+			timeout: func(limits *sztpclient.HTTPRequestLimits) *time.Duration {
+				return &limits.BootstrapTimeout
+			},
+		},
+		{
+			name: "progress-timeout",
+			timeout: func(limits *sztpclient.HTTPRequestLimits) *time.Duration {
+				return &limits.ProgressTimeout
+			},
+		},
+		{
+			name: "host-meta-max-response-bytes",
+			bytes: func(limits *sztpclient.HTTPRequestLimits) *int64 {
+				return &limits.HostMetaMaxResponseBytes
+			},
+		},
+		{
+			name: "bootstrap-max-response-bytes",
+			bytes: func(limits *sztpclient.HTTPRequestLimits) *int64 {
+				return &limits.BootstrapMaxResponseBytes
+			},
+		},
+		{
+			name: "progress-max-response-bytes",
+			bytes: func(limits *sztpclient.HTTPRequestLimits) *int64 {
+				return &limits.ProgressMaxResponseBytes
+			},
+		},
+	} {
 		t.Run(option.name, func(t *testing.T) {
 			yamlValue, cliValue := "4096", "8192"
 			if option.timeout != nil {
@@ -54,25 +95,20 @@ func TestHTTPRequestLimitsConfig(t *testing.T) {
 					if err != nil {
 						t.Fatal(err)
 					}
-					want := Config{RequestLimits: defaults}
-					for _, field := range httpLimitOptions(&want) {
-						if field.name != option.name {
-							continue
+					want := sztpclient.DefaultHTTPRequestLimits()
+					if option.timeout != nil {
+						*option.timeout(&want) = 45 * time.Second
+						if source != "YAML" {
+							*option.timeout(&want) = 2 * time.Minute
 						}
-						if field.timeout != nil {
-							*field.timeout = 45 * time.Second
-							if source != "YAML" {
-								*field.timeout = 2 * time.Minute
-							}
-						} else {
-							*field.bytes = 4096
-							if source != "YAML" {
-								*field.bytes = 8192
-							}
+					} else {
+						*option.bytes(&want) = 4096
+						if source != "YAML" {
+							*option.bytes(&want) = 8192
 						}
 					}
-					if got.RequestLimits != want.RequestLimits {
-						t.Fatalf("limits=%+v, want %+v", got.RequestLimits, want.RequestLimits)
+					if got.RequestLimits != want {
+						t.Fatalf("limits=%+v, want %+v", got.RequestLimits, want)
 					}
 				})
 			}
