@@ -5,6 +5,8 @@ SPDX-License-Identifier: Apache-2.0
 
 # SZTP Client
 
+This project is evolving rapidly and may introduce breaking changes at this stage. We plan to introduce versioned releases in the near future.
+
 SZTP Client automates device onboarding using Secure Zero Touch Provisioning. It connects to a bootstrap server using mutual TLS, downloads configuration and runs provisioning scripts. It is written in Go and intended for computers, DPUs and network equipment.
 
 The client has been tested with [FusionLayer Xverse](https://www.fusionlayer.com/xverse) and [Watsen Networks SZTPD](https://watsen.net/products/sztpd). Compatibility with other servers has not been verified. Full [RFC 8572](https://datatracker.ietf.org/doc/html/rfc8572) compliance is a work in progress.
