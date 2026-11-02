@@ -8,6 +8,7 @@ SPDX-License-Identifier: Apache-2.0
 Use this guide to test changes or package releases. For building and running, see the [quick start](../README.md#quick-start) and [deployment guide](deployment.md).
 
 - [Run unit tests and static checks](#run-unit-tests-and-static-checks)
+- [Check GitHub Actions workflows before committing](#check-github-actions-workflows-before-committing)
 - [Test DHCP discovery with Docker](#test-dhcp-discovery-with-docker)
 - [Protocol details](#protocol-details)
 - [Runtime details](#runtime-details)
@@ -32,6 +33,72 @@ Run as an ordinary user so permission tests do not skip. Race tests need CGO and
 On 2026-10-21, a temporary module file declaring `go 1.26.0` was tested without changing project module files. Selected dependencies require at least Go 1.26.
 
 Go 1.26.10 passed `go vet` and Linux/amd64 and Linux/arm64 cross-builds. Versions 1.26.6 and 1.26.10 failed `TestNormalizeHostnameValidation/invalid_UTF-8_hostname`, accepting invalid UTF-8 because dependency IDNA tables differ from Go 1.27. Supporting Fedora's Go 1.26 builds needs [explicit UTF-8 validation and testing](PLAN.md#go-126-compatibility) before lowering the minimum.
+
+## Check GitHub Actions workflows before committing
+
+The root `.pre-commit-config.yaml` pins actionlint and REUSE. Both hooks run on
+every commit and check the whole repository rather than only changed files.
+Actionlint checks workflow syntax, expressions and job dependencies. Install
+ShellCheck too so it checks Bash and sh commands in `run:` steps.
+
+On macOS with Homebrew:
+
+```sh
+brew install pre-commit shellcheck
+```
+
+On Debian or Ubuntu, with Python 3 and venv support installed:
+
+```sh
+sudo apt-get install --yes pipx shellcheck
+pipx install pre-commit==4.7.0
+pipx ensurepath
+```
+
+Open a new terminal after updating PATH. Pre-commit needs Python 3. The actionlint
+hook uses Go in an isolated environment and can download Go when it is absent.
+The first run needs network access to install the pinned hooks and dependencies.
+Docker is unnecessary for these hooks.
+
+From the repository root, install the hook once per clone:
+
+```sh
+pre-commit install
+```
+
+Run all checks manually, or select one:
+
+```sh
+pre-commit validate-config
+pre-commit run --all-files
+pre-commit run actionlint --all-files
+pre-commit run reuse --all-files
+```
+
+An unsuccessful hook prevents the commit. During a commit, pre-commit temporarily
+hides unstaged edits to tracked files. Manual runs check the working tree.
+Whole-repository tools can also see nonignored untracked files, so add intended
+new files before checking. A bypassed or uninstalled hook does not provide local
+verification. CI runs actionlint independently in `workflow-lint.yml`, while
+`reuse.yml` retains its separate licensing check.
+
+For an optional local execution test with act, start Docker and choose a runner
+image with Python, Go and sudo:
+
+```sh
+act pull_request -W .github/workflows/workflow-lint.yml -j actionlint
+```
+
+On Apple Silicon, prefer an ARM64-compatible runner image. Use
+`--container-architecture linux/arm64` to select ARM64 explicitly.
+Use `--container-architecture linux/amd64` only when the runner image or
+an action requires AMD64, which requires emulation on ARM64.
+This setting applies to act independently of `SZTP_DHCP_PLATFORM`.
+Local runs do not reproduce all GitHub behavior. See
+[act documentation](https://nektosact.com/usage/index.html) for setup and limitations.
+
+See [actionlint usage](https://github.com/rhysd/actionlint/blob/main/docs/usage.md)
+and [pre-commit](https://pre-commit.com/).
 
 ## Test DHCP discovery with Docker
 

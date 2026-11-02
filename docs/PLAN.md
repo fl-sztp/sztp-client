@@ -113,24 +113,26 @@ Accept focused tests/Linux checks while preserving mutual TLS, pending recovery,
 
 ### CI Workflows and Local Validation
 
-Keep [REUSE](../.github/workflows/reuse.yml); add `.github/workflows/ci.yml`. Both use pull requests/`workflow_dispatch`; start Go 1.27 independently of [1.26](#go-126-compatibility).
+CI does not test application behavior. The only current workflows, [REUSE](../.github/workflows/reuse.yml) and [Workflow lint](../.github/workflows/workflow-lint.yml), check license metadata and GitHub Actions definitions. They neither build the client nor run Go tests, `go vet`, race tests or DHCP integration. A green CI result can therefore accompany a broken Linux implementation. Remediation remains open.
+
+Keep both existing workflows and add `.github/workflows/ci.yml`, using pull requests/`workflow_dispatch`. Leave actionlint in the existing Workflow lint workflow rather than duplicating it in the new workflow. Start Go 1.27 independently of [1.26](#go-126-compatibility). Reuse the existing tests and Docker runner without introducing a new test framework.
 
 - [ ] Create four independent Ubuntu 24.04 jobs:
 
   | Job | Checks |
   |---|---|
-  | Formatting/workflows | Fail on nonempty `gofmt -l` without rewriting. Run [actionlint](https://github.com/rhysd/actionlint/blob/main/docs/checks.md) on every workflow. |
-  | Linux tests | Run the Linux checks above as an ordinary user, with CGO/C compiler. |
+  | Formatting | Fail on nonempty `gofmt -l` without rewriting. |
+  | Linux tests | Run `go test -mod=readonly ./...`, `go vet -mod=readonly ./...` and `go test -mod=readonly -race ./...` as an ordinary user, with CGO/C compiler. |
   | Linux builds | Static Linux/amd64 and Linux/arm64 builds with [documented settings](deployment.md#build-a-linux-binary). |
   | DHCP integration | Full `bash docker-tests/integration/run.sh`, no `--quick`, using the existing Docker builder. |
 
 - [ ] Use latest Go 1.27 patch for host jobs, `GOTOOLCHAIN=local`, recording resolved versions. Add 1.26 after its fix/minimum update.
-- [ ] Pin actions to verified commits; set `contents: read` and job timeouts.
-- [ ] Set DHCP `TMPDIR` to runner temp; upload `sztp-dhcp.*` even on failure, preserving exit status. Root integration cannot replace ordinary-user permission tests.
-- [ ] Align local/CI commands; document commands, versions, runner images, architectures and prerequisites in [development](development.md#run-unit-tests-and-static-checks).
+- [ ] Pin actions to verified commits. Set `contents: read` and job timeouts.
+- [ ] Set DHCP `TMPDIR` to runner temp. Upload `sztp-dhcp.*` even on failure, preserving exit status. Root integration cannot replace ordinary-user permission tests.
+- [ ] Align local/CI commands. Document commands, versions, runner images, architectures and prerequisites in [development](development.md#run-unit-tests-and-static-checks).
 - [ ] Run local actionlint/Linux/full Docker checks, then actual GitHub jobs. Optional [act](https://nektosact.com/usage/index.html) requires documenting [runner differences](https://nektosact.com/usage/runners.html)/[unsupported features](https://nektosact.com/not_supported.html).
 
-Accept local/GitHub passes, both architectures and full DHCP catalog, without root-related skips (intentional subprocess-helper skips allowed). Inject formatting/test/DHCP failures: jobs fail and artifacts remain downloadable. Leave tracked files unchanged; record environments/commands/results. Application/API changes and branch protection are outside scope.
+Accept local/GitHub passes, both architectures and full DHCP catalog, without root-related skips (intentional subprocess-helper skips allowed). Inject formatting/test/build/DHCP failures: the corresponding jobs fail and DHCP artifacts remain downloadable even on failure. Leave tracked files unchanged. Record environments/commands/results. Application/API changes and branch protection are outside scope.
 
 ### Bootstrap Error Diagnostics
 

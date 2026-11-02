@@ -1,0 +1,31 @@
+# SPDX-FileCopyrightText: NONE
+# SPDX-License-Identifier: Apache-2.0
+# Routine declarative tool configuration. No original expressive content identified.
+
+name: Workflow lint
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  actionlint:
+    name: GitHub Actions workflows
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - name: Install validation tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes shellcheck
+          python3 -m venv "$RUNNER_TEMP/workflow-lint-venv"
+          "$RUNNER_TEMP/workflow-lint-venv/bin/python" -m pip install pre-commit==4.7.0
+      - name: Check all workflows
+        run: '"$RUNNER_TEMP/workflow-lint-venv/bin/pre-commit" run actionlint --all-files'
