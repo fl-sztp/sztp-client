@@ -38,6 +38,20 @@ while (( $# )); do
 done
 if (( help_seen )); then usage; exit 0; fi
 
+export SZTP_DHCP_PLATFORM
+if [[ -z "${SZTP_DHCP_PLATFORM:-}" ]]; then
+    daemon_platform=$(docker info --format '{{.OSType}}/{{.Architecture}}')
+    case "$daemon_platform" in
+        linux/aarch64|linux/arm64) SZTP_DHCP_PLATFORM=linux/arm64 ;;
+        linux/x86_64|linux/amd64) SZTP_DHCP_PLATFORM=linux/amd64 ;;
+        *) echo "Unsupported Docker platform: $daemon_platform" >&2; exit 1 ;;
+    esac
+fi
+case "$SZTP_DHCP_PLATFORM" in
+    linux/arm64|linux/amd64) ;;
+    *) echo "Unsupported SZTP_DHCP_PLATFORM: $SZTP_DHCP_PLATFORM" >&2; exit 1 ;;
+esac
+
 script_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)
 export SZTP_DHCP_REPOSITORY
 SZTP_DHCP_REPOSITORY=$(cd -- "$script_dir/../.." && pwd -P)
@@ -122,8 +136,8 @@ printf 'Artifacts: %s\nProject: %s\n' "$SZTP_DHCP_ARTIFACTS" "$SZTP_DHCP_PROJECT
 run_logged build.log "${compose[@]}" build fixture
 architecture=$(docker image inspect --format '{{.Os}}/{{.Architecture}}' "$SZTP_DHCP_IMAGE")
 printf '%s\n' "$architecture" >"$SZTP_DHCP_ARTIFACTS/image-platform.txt"
-if [[ "$architecture" != linux/amd64 ]]; then
-    echo "Built image platform is $architecture; require linux/amd64" >&2
+if [[ "$architecture" != "$SZTP_DHCP_PLATFORM" ]]; then
+    echo "Built image platform is $architecture; require $SZTP_DHCP_PLATFORM" >&2
     exit 1
 fi
 project_started=1

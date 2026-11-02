@@ -46,6 +46,8 @@ if [ "$1" = compose ]; then
   run) printf '%s\n' "$@" > "$RUNNER_ARGS"; echo tester-output; exit "$RUNNER_TESTER_STATUS" ;;
   down) echo cleaned > "$RUNNER_CLEANUP" ;;
  esac
+elif [ "$1" = info ]; then
+ echo linux/x86_64
 elif [ "$1" = image ]; then
  echo linux/amd64
 elif [ "$1" = network ] && [ "$2" = inspect ]; then
@@ -56,7 +58,7 @@ fi
 				t.Fatal(err)
 			}
 			cmd := exec.Command("/bin/bash", append([]string{"run.sh"}, tt.args...)...)
-			cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "TMPDIR="+dir, "RUNNER_CALLS="+filepath.Join(dir, "calls"), "RUNNER_ARGS="+filepath.Join(dir, "args"), "RUNNER_CLEANUP="+filepath.Join(dir, "cleanup"), "RUNNER_TESTER_STATUS="+tt.testerStatus)
+			cmd.Env = append(os.Environ(), "SZTP_DHCP_PLATFORM=", "PATH="+dir+":"+os.Getenv("PATH"), "TMPDIR="+dir, "RUNNER_CALLS="+filepath.Join(dir, "calls"), "RUNNER_ARGS="+filepath.Join(dir, "args"), "RUNNER_CLEANUP="+filepath.Join(dir, "cleanup"), "RUNNER_TESTER_STATUS="+tt.testerStatus)
 			output, err := cmd.CombinedOutput()
 			status := 0
 			if err != nil {
@@ -210,6 +212,77 @@ esac
 			}
 			if _, err := os.Stat(filepath.Join(destination, "modules", "example.org/library@v1.2.3", "source.go")); !os.IsNotExist(err) {
 				t.Fatalf("collector copied unrelated source: %v", err)
+			}
+		})
+	}
+}
+
+func TestRunnerPlatform(t *testing.T) {
+	for _, tc := range []struct {
+		name, daemon, override, image, want string
+		infoFailure                         bool
+		wantStatus                          int
+	}{
+		{name: "native ARM64", daemon: "linux/aarch64", image: "linux/arm64", want: "linux/arm64"},
+		{name: "canonical ARM64", daemon: "linux/arm64", image: "linux/arm64", want: "linux/arm64"},
+		{name: "native AMD64", daemon: "linux/x86_64", image: "linux/amd64", want: "linux/amd64"},
+		{name: "canonical AMD64", daemon: "linux/amd64", image: "linux/amd64", want: "linux/amd64"},
+		{name: "explicit AMD64", daemon: "linux/aarch64", override: "linux/amd64", image: "linux/amd64", want: "linux/amd64"},
+		{name: "explicit ARM64", daemon: "linux/x86_64", override: "linux/arm64", image: "linux/arm64", want: "linux/arm64"},
+		{name: "unsupported daemon", daemon: "linux/s390x", wantStatus: 1},
+		{name: "unsupported override", override: "linux/arm/v7", wantStatus: 1},
+		{name: "daemon failure", infoFailure: true, wantStatus: 1},
+		{name: "image mismatch", daemon: "linux/aarch64", image: "linux/amd64", want: "linux/arm64", wantStatus: 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			fake := `#!/bin/sh
+case "$1" in
+ info)
+  [ "$PLATFORM_INFO_FAILURE" != true ] || exit 1
+  echo "$PLATFORM_DAEMON"
+  exit 0
+  ;;
+ image) echo "$PLATFORM_IMAGE" ;;
+ network)
+  if [ "$2" = inspect ] && [ "$3" = --format ]; then echo false/true/false; fi
+  ;;
+ compose)
+  shift 5
+  case "$1" in
+   config) echo "$SZTP_DHCP_PLATFORM" > "$PLATFORM_SELECTED" ;;
+   up) touch "$PLATFORM_STARTED" ;;
+  esac
+  ;;
+esac
+`
+			if err := os.WriteFile(filepath.Join(dir, "docker"), []byte(fake), 0755); err != nil {
+				t.Fatal(err)
+			}
+			cmd := exec.Command("bash", "run.sh")
+			cmd.Env = append(os.Environ(), "PATH="+dir+":"+os.Getenv("PATH"), "TMPDIR="+dir,
+				"SZTP_DHCP_PLATFORM="+tc.override, "PLATFORM_DAEMON="+tc.daemon, "PLATFORM_IMAGE="+tc.image,
+				"PLATFORM_INFO_FAILURE="+map[bool]string{true: "true", false: "false"}[tc.infoFailure],
+				"PLATFORM_SELECTED="+filepath.Join(dir, "selected"), "PLATFORM_STARTED="+filepath.Join(dir, "started"))
+			output, err := cmd.CombinedOutput()
+			status := 0
+			if err != nil {
+				if e, ok := err.(*exec.ExitError); ok {
+					status = e.ExitCode()
+				} else {
+					t.Fatal(err)
+				}
+			}
+			if status != tc.wantStatus {
+				t.Fatalf("status %d, want %d: %s", status, tc.wantStatus, output)
+			}
+			selected, _ := os.ReadFile(filepath.Join(dir, "selected"))
+			if strings.TrimSpace(string(selected)) != tc.want {
+				t.Errorf("platform %q, want %q", selected, tc.want)
+			}
+			_, started := os.Stat(filepath.Join(dir, "started"))
+			if tc.wantStatus != 0 && !os.IsNotExist(started) {
+				t.Error("started fixture after platform failure")
 			}
 		})
 	}

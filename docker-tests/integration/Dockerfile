@@ -4,8 +4,10 @@
 # SPDX-License-Identifier: Apache-2.0
 
 FROM --platform=$BUILDPLATFORM golang:1.27.1-alpine3.24 AS builder
+ARG TARGETOS
+ARG TARGETARCH
 WORKDIR /src
-ENV CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOFLAGS=-mod=readonly
+ENV CGO_ENABLED=0 GOOS=$TARGETOS GOARCH=$TARGETARCH GOFLAGS=-mod=readonly
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .

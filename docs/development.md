@@ -41,13 +41,26 @@ Use Bash and Docker Desktop or rootful Linux Docker Engine with:
 
 - BuildKit and Compose **2.27.1 or later** for [service network `driver_opts`](https://docs.docker.com/reference/compose-file/services/#driver_opts).
 - `com.docker.network.endpoint.sysctls` support.
-- Linux/amd64 emulation on ARM hosts ([included in Docker Desktop](https://docs.docker.com/build/building/multi-platform/)).
+- A Linux/arm64 or Linux/amd64 Docker server. The runner selects its native architecture by default.
 
 Host Go and device certificates are unnecessary. From the repository root, run all 89 cases:
 
 ```sh
 bash docker-tests/integration/run.sh
 ```
+
+To select a target explicitly, set `SZTP_DHCP_PLATFORM` to `linux/arm64` or
+`linux/amd64`:
+
+```sh
+SZTP_DHCP_PLATFORM=linux/amd64 bash docker-tests/integration/run.sh
+```
+
+The default follows the Docker server, including remote Docker contexts.
+Cross-architecture execution requires emulation. Validate each architecture on
+native hardware when possible. An ARM64 pass does not verify AMD64 execution.
+The runner checks the image platform and the tests check that the client ELF
+architecture matches the test process. Unsupported targets are rejected.
 
 Quick mode runs 85, omitting four timeout/retry checks:
 
@@ -71,7 +84,7 @@ Containers and networks are removed on success, failure or interrupt/termination
 
 ### What the suite covers
 
-The production Linux/amd64 client exchanges real DHCP packets on a dual-stack network. Coverage includes options 143/136, text and URI lists, Unicode, long URIs, invalid addresses, malformed payloads, IPv4 fragments, protocol selection, fallback/retries, diagnostic reports, early stopping, configuration precedence, identity and certificate inspection. Full provisioning and BF3 hardware tests are separate.
+The production Linux/arm64 or Linux/amd64 client exchanges real DHCP packets on a dual-stack network. Coverage includes options 143/136, text and URI lists, Unicode, long URIs, invalid addresses, malformed payloads, IPv4 fragments, protocol selection, fallback/retries, diagnostic reports, early stopping, configuration precedence, identity and certificate inspection. Full provisioning and BF3 hardware tests are separate.
 
 Each run has its own Compose project and bridge: no NAT, default routes, IPv6 router advertisements or published ports. `internal: true` drops required raw IPv4 broadcasts, so isolation uses disabled NAT and removed routes.
 

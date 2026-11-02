@@ -48,8 +48,8 @@ type fixtureAPI struct {
 
 func newDriver(t *testing.T, ctx context.Context) *integrationDriver {
 	t.Helper()
-	if runtime.GOOS != "linux" || runtime.GOARCH != "amd64" {
-		t.Fatalf("integration runtime is %s/%s, require linux/amd64", runtime.GOOS, runtime.GOARCH)
+	if runtime.GOOS != "linux" {
+		t.Fatalf("integration runtime is %s/%s, require linux", runtime.GOOS, runtime.GOARCH)
 	}
 	binary, err := elf.Open(productionBinary)
 	if err != nil {
@@ -59,8 +59,8 @@ func newDriver(t *testing.T, ctx context.Context) *integrationDriver {
 	if err := binary.Close(); err != nil {
 		t.Fatalf("close production ELF: %v", err)
 	}
-	if machine != elf.EM_X86_64 || class != elf.ELFCLASS64 {
-		t.Fatalf("production ELF is %s/%s, require 64-bit x86-64", machine, class)
+	if err := validateProductionPlatform(runtime.GOARCH, machine, class); err != nil {
+		t.Fatal(err)
 	}
 	iface, err := net.InterfaceByName("eth0")
 	if err != nil || iface == nil || len(iface.HardwareAddr) != 6 {
@@ -377,4 +377,41 @@ func (p *clientProcess) awaitDiscovery(ctx context.Context, c integrationCase) e
 		case <-tick.C:
 		}
 	}
+}
+
+func TestProductionPlatform(t *testing.T) {
+	for _, tc := range []struct {
+		arch      string
+		machine   elf.Machine
+		class     elf.Class
+		wantError bool
+	}{
+		{"arm64", elf.EM_AARCH64, elf.ELFCLASS64, false},
+		{"amd64", elf.EM_X86_64, elf.ELFCLASS64, false},
+		{"arm64", elf.EM_X86_64, elf.ELFCLASS64, true},
+		{"amd64", elf.EM_AARCH64, elf.ELFCLASS64, true},
+		{"arm64", elf.EM_AARCH64, elf.ELFCLASS32, true},
+		{"amd64", elf.EM_X86_64, elf.ELFCLASS32, true},
+		{"386", elf.EM_386, elf.ELFCLASS32, true},
+	} {
+		if err := validateProductionPlatform(tc.arch, tc.machine, tc.class); (err != nil) != tc.wantError {
+			t.Errorf("%s/%s/%s: %v", tc.arch, tc.machine, tc.class, err)
+		}
+	}
+}
+
+func validateProductionPlatform(arch string, machine elf.Machine, class elf.Class) error {
+	var expected elf.Machine
+	switch arch {
+	case "arm64":
+		expected = elf.EM_AARCH64
+	case "amd64":
+		expected = elf.EM_X86_64
+	default:
+		return fmt.Errorf("unsupported integration architecture: %s", arch)
+	}
+	if machine != expected || class != elf.ELFCLASS64 {
+		return fmt.Errorf("production ELF is %s/%s, require %s/ELFCLASS64 for %s", machine, class, expected, arch)
+	}
+	return nil
 }

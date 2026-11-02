@@ -5,7 +5,7 @@ name: ${SZTP_DHCP_PROJECT:?Run integration/run.sh to set the project name}
 
 x-runtime: &runtime
   image: ${SZTP_DHCP_IMAGE:?Run integration/run.sh to set the image name}
-  platform: linux/amd64
+  platform: ${SZTP_DHCP_PLATFORM:?Run integration/run.sh to select the platform}
   cap_add:
     - NET_RAW
     - NET_BIND_SERVICE
